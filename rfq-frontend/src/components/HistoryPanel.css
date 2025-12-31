@@ -1,0 +1,49 @@
+.history-box {
+  width: 100%;
+  background: #ffffff;
+  border-radius: 8px;
+  border: 1px solid #ddd;
+  padding: 8px 10px;
+  box-sizing: border-box;
+}
+
+.history-box h3 {
+  margin: 0 0 6px 0;
+}
+
+.empty-box {
+  color: gray;
+  padding: 6px;
+}
+
+.rfq-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+  max-height: 200px;
+}
+
+.rfq-card {
+  padding: 8px;
+  border-radius: 6px;
+  border: 1px solid #d6d6d6;
+  cursor: pointer;
+  background: #f8fbff;
+  transition: background 0.2s, transform 0.1s;
+}
+
+.rfq-card:hover {
+  background: #e3efff;
+  transform: scale(0.99);
+}
+
+.rfq-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.rfq-score {
+  font-size: 12px;
+  color: #555;
+}

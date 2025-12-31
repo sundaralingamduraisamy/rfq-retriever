@@ -1,0 +1,26 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.db
+*.pkl
+*.index
+*.json
+
+# Data & ML
+faiss_index/
+data/
+exports/
+vector.index
+
+# Node
+rfq-frontend/node_modules/
+rfq-frontend/dist/
+rfq-frontend/build/
+
+# System
+.vscode/
+.idea/
+.DS_Store
