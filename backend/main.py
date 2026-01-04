@@ -1,4 +1,5 @@
 import os
+import uvicorn
 from fastapi import FastAPI, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -367,3 +368,7 @@ def list_documents():
     # Sort by newest first
     files.sort(key=lambda x: x["uploadedAt"], reverse=True)
     return files
+
+
+if __name__ == "__main__":
+    uvicorn.run("main:app", host=settings.HOST, port=settings.PORT, reload=True)

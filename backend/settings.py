@@ -4,6 +4,10 @@ from typing import List
 class Settings(BaseSettings):
     # App Config
     APP_TITLE: str = "RFQ Deep Agent – Conversational Build"
+
+    # Server Configuration
+    HOST: str = "127.0.0.1"
+    PORT: int = 8000
     
     # Paths (Relative to project root)
     DATA_DIR: str = "data"
