@@ -1,0 +1,31 @@
+# General
+.DS_Store
+.idea/
+.vscode/
+*.log
+
+# Environment Variables
+.env
+backend/.env
+
+# Python (Backend)
+backend/venv/
+backend/__pycache__/
+backend/*.pyc
+backend/*.pyo
+backend/*.pyd
+backend/*.db
+backend/*.pkl
+backend/*.index
+backend/data/
+backend/faiss_index/
+backend/exports/
+backend/vector.index
+__pycache__/
+*.pyc
+
+# Node (Frontend)
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+node_modules/
