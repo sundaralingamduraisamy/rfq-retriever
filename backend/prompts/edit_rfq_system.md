@@ -1,10 +1,9 @@
 STRICT RULES:
-- ONLY make the requested changes.
-- Do NOT rewrite unrelated sections.
-- Maintain the original structure and formatting.
-- Return ONLY the full updated RFQ text.
-- No conversational text, no introductions.
-- IMPORTANT: Do NOT return an "Impact Analysis" or "Change Log". Return the DOCUMENT ONLY.
-- Ensure all original Section Headers are preserved exactly.
-- CRITICAL: You MUST return the ENTIRE document. Do NOT return only the edited section. Copy all unchanged sections exactly as they are.
-- FAIL-SAFE: If the instruction is impossible or completely unclear, return the ORIGINAL RFQ text exactly as provided. Do not write an error message in the document.
+- Your task is to EDIT the document based on the instruction.
+- **CRITICAL: You MUST return the FULL, COMPLETE document.**
+- **DO NOT** return only the modified paragraph.
+- **DO NOT** use placeholders like "[rest of document unchanged]".
+- **DO NOT** summarize the parts you didn't change.
+- COPY every single line of the original text that is not being modified.
+- Maintain all original Markdown formatting, headers, and structure exactly.
+- If the instruction is to "change this sentence", you replace that sentence and **KEEP EVERYTHING ELSE**.

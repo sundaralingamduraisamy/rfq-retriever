@@ -14,13 +14,15 @@ import { ActivityFeed } from '@/components/dashboard/ActivityFeed';
 import { currentUser, recentRFQs, notifications, dashboardStats } from '@/data/mockData';
 
 export default function Dashboard() {
+  const user = JSON.parse(localStorage.getItem("user") || '{"name": "Guest", "role": "Visitor"}');
+
   return (
     <MainLayout>
       <div className="p-6 lg:p-8 space-y-8">
         {/* Header */}
         <div className="animate-fade-in">
           <h1 className="text-2xl font-bold">
-            Welcome back, <span className="gradient-text">{currentUser.name.split(' ')[0]}</span>
+            Welcome back, <span className="gradient-text">{user.name.split(' ')[0]}</span>
           </h1>
           <p className="text-muted-foreground mt-1">
             Here's an overview of your RFQ generation activity

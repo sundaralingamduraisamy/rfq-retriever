@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/resizable';
 import { Button } from '@/components/ui/button';
 
-const BACKEND = import.meta.env.VITE_BACKEND_URL;
+const BACKEND = import.meta.env.VITE_BACKEND_URL || "http://127.0.0.1:8000";
 
 type RetrievedRFQ = {
   file: string;
@@ -152,7 +152,19 @@ export default function GenerateRFQ() {
         });
 
         const searchData = await searchRes.json();
-        setRetrievedRFQs(searchData.results || []);
+        const results = searchData.results || [];
+        setRetrievedRFQs(results);
+
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `msg-found-${Date.now()}`,
+            role: 'assistant',
+            content: `I found ${results.length} relevant RFQ(s) in the database. Please select one from the list on the right to use as a reference.`,
+            timestamp: new Date().toISOString(),
+          },
+        ]);
+
         setReferenceText(null);
         setDraftText(null);
       } catch {
@@ -325,8 +337,8 @@ export default function GenerateRFQ() {
                       <div
                         key={rfq.file}
                         className={`border rounded-lg p-4 cursor-pointer ${selectedRFQ === rfq.file
-                            ? 'border-primary bg-primary/5'
-                            : 'bg-card'
+                          ? 'border-primary bg-primary/5'
+                          : 'bg-card'
                           }`}
                         onClick={async () => {
                           setSelectedRFQ(rfq.file);

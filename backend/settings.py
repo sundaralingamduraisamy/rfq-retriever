@@ -5,6 +5,12 @@ class Settings(BaseSettings):
     # App Config
     APP_TITLE: str = "RFQ Deep Agent – Conversational Build"
 
+    # Auth Configuration
+    APP_USER: str = "admin"
+    APP_PASSWORD: str = "admin"
+    APP_ROLE: str = "Admin"
+    APP_NAME: str = "Rahul"
+
     # Server Configuration
     HOST: str = "127.0.0.1"
     PORT: int = 8000
@@ -17,9 +23,8 @@ class Settings(BaseSettings):
     # LLM Configuration
     LLM_PROVIDER: str = "groq"
     LLM_API_KEY: str
-    LLM_MODEL_NAME: str = "openai/gpt-oss-20b"
+    LLM_MODEL_NAME: str = "llama3-70b-8192"
     LLM_TEMPERATURE: float = 0.4
-    LLM_MAX_TOKENS: int = 1200
 
     # Conflict/Secondary LLM (Optional)
     CONFLICT_LLM_PROVIDER: str | None = None

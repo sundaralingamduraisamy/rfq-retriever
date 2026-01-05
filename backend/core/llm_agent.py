@@ -159,6 +159,8 @@ def chat_with_llm(messages: List[dict]):
         return last_message.content
 
     except Exception as e:
-        print(f"Graph Error: {e}")
+        print(f"❌ Graph Error in chat_with_llm: {e}")
+        import traceback
+        traceback.print_exc()
         # Fallback error message
         return "I'm having trouble connecting to the AI agent right now. Please check your connection or API key."

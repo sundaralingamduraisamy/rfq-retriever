@@ -27,23 +27,29 @@ def chunk_text(text, size=900, overlap=700):
     return chunks
 
 def ingest(folder="data"):
-    if os.path.exists("chunk_index.json"):
-        print("Indexes already exist")
-        return
+    # Always overwrite for now to ensure freshness
+    print(f"I will ingest documents from {folder}...")
 
     entries = []
+
+    if not os.path.exists(folder):
+        print(f"Folder {folder} does not exist.")
+        return
 
     for fname in os.listdir(folder):
         path = os.path.join(folder, fname)
 
         if fname.endswith(".pdf"):
+            print(f"Processing {fname}...")
             text = load_pdf(path)
         elif fname.endswith(".docx"):
+            print(f"Processing {fname}...")
             text = load_docx(path)
         else:
             continue
 
         text_chunks = chunk_text(text)
+        print(f"  - Generated {len(text_chunks)} chunks. Generating embeddings...")
 
         embeddings = model.encode(text_chunks)
 
@@ -58,4 +64,7 @@ def ingest(folder="data"):
     with open("chunk_index.json", "w", encoding="utf-8") as f:
         json.dump(entries, f, ensure_ascii=False, indent=2)
 
-    print("Chunk Index Created Successfully")
+    print(f"✅ Chunk Index Created Successfully with {len(entries)} chunks.")
+
+if __name__ == "__main__":
+    ingest()

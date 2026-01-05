@@ -84,7 +84,21 @@ def hybrid_search(query):
         })
 
     scored.sort(key=lambda x: x["relevance"], reverse=True)
-    return scored[:settings.RETRIEVER_TOP_K]
+
+    # Deduplicate by file (return only the highest scoring chunk per file)
+    unique_results = []
+    seen_files = set()
+
+    for item in scored:
+        fname = item["source"]["file"]
+        if fname not in seen_files:
+            unique_results.append(item)
+            seen_files.add(fname)
+        
+        if len(unique_results) >= settings.RETRIEVER_TOP_K:
+            break
+
+    return unique_results
 
 
 # --------------------------------

@@ -23,11 +23,9 @@ import {
 } from '@/components/ui/tooltip';
 
 const navItems = [
-  { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
   { icon: MessageSquarePlus, label: 'Generate RFQ', path: '/generate' },
   { icon: FileText, label: 'My RFQs', path: '/rfqs' },
   { icon: FolderOpen, label: 'Document Library', path: '/library' },
-  { icon: Settings, label: 'Settings', path: '/settings' },
 ];
 
 export function Sidebar() {

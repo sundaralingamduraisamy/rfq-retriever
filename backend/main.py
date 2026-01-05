@@ -1,4 +1,5 @@
 import os
+import uuid
 import uvicorn
 from fastapi import FastAPI, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,6 +17,12 @@ from core.prompt_loader import load_prompt
 from settings import settings
 
 app = FastAPI(title=settings.APP_TITLE)
+
+# Debug: Print loaded LLM config
+print(f"✅ LLM Config: Provider={settings.LLM_PROVIDER}, Model={settings.LLM_MODEL_NAME}")
+
+# Generate a unique instance ID on startup
+SERVER_INSTANCE_ID = str(uuid.uuid4())
 
 app.add_middleware(
     CORSMiddleware,
@@ -57,9 +64,38 @@ class ChangeModel(BaseModel):
     new_text: str
 
 
+
 class EditRFQModel(BaseModel):
     current_text: str
     instruction: str
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+@app.get("/api/config")
+def get_config():
+    return {
+        "appName": settings.APP_NAME,
+        "appRole": settings.APP_ROLE,
+        "instanceId": SERVER_INSTANCE_ID
+    }
+
+
+@app.post("/api/login")
+def login(creds: LoginRequest):
+    if creds.username == settings.APP_USER and creds.password == settings.APP_PASSWORD:
+        return {
+            "token": "valid-session",  # simplified session
+            "user": {
+                "name": settings.APP_NAME,
+                "role": settings.APP_ROLE
+            },
+            "instanceId": SERVER_INSTANCE_ID
+        }
+    raise HTTPException(status_code=401, detail="Invalid Credentials")
 
 
 @app.get("/")
@@ -182,19 +218,27 @@ I can help with requirement validation, RFQ search, intelligent drafting, editin
 
 @app.post("/validate_requirement")
 def validate_requirement(data: ValidateModel):
+    print(f"📥 Validating Requirement: {data.requirement}")
+    try:
+        question = load_prompt("validate_requirement_user.md", requirement=data.requirement)
 
-    question = load_prompt("validate_requirement_user.md", requirement=data.requirement)
+        result = chat_with_llm([
+            {"role": "system", "content": load_prompt("validator_system.md")},
+            {"role": "user", "content": question}
+        ]).strip().lower()
 
-    result = chat_with_llm([
-        {"role": "system", "content": load_prompt("validator_system.md")},
-        {"role": "user", "content": question}
-    ]).strip().lower()
+        print(f"🤖 Validation Result: {result}")
 
-    if "trouble generating" in result or "LLM model is unavailable" in result:
-        return {
-            "valid": False,
-            "message": "⚠️ **System Error**: LLM functionality is unavailable. Please check your **LLM_API_KEY** in `.env`."
-        }
+        if "trouble generating" in result or "LLM model is unavailable" in result:
+             return {
+                "valid": False,
+                "message": "⚠️ **System Error**: LLM functionality is unavailable. Please check your **LLM_API_KEY** in `.env`."
+            }
+    except Exception as e:
+        print(f"❌ Error in validate_requirement: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
     if result.startswith("yes"):
         return {"valid": True, "message": "Valid Automobile Requirement"}
@@ -279,10 +323,14 @@ def get_rfq_text(filename: str):
         raise HTTPException(404, "RFQ Text Not Found")
 
 
-@app.post("/export/pdf")
-async def export_pdf(body: str = Body(..., media_type="text/plain")):
+class ExportRequest(BaseModel):
+    content: str
 
-    clean = clean_rfq_text(body)
+
+@app.post("/export/pdf")
+async def export_pdf(data: ExportRequest):
+
+    clean = clean_rfq_text(data.content)
 
     rfq = {"name": "CUSTOM_RFQ", "domain": "Automobile", "body": clean}
     file_bytes = render_pdf(rfq, 1)
@@ -290,13 +338,13 @@ async def export_pdf(body: str = Body(..., media_type="text/plain")):
     path = os.path.join(EXPORT_DIR, "RFQ_Final.pdf")
     open(path, "wb").write(file_bytes)
 
-    return {"path": path.replace("\\", "/")}
+    return FileResponse(path, media_type="application/pdf", filename="RFQ_Final.pdf")
 
 
 @app.post("/export/docx")
-async def export_docx(body: str = Body(..., media_type="text/plain")):
+async def export_docx(data: ExportRequest):
 
-    clean = clean_rfq_text(body)
+    clean = clean_rfq_text(data.content)
 
     rfq = {"name": "CUSTOM_RFQ", "domain": "Automobile", "body": clean}
     file_bytes = render_docx(rfq, 1)
@@ -304,7 +352,7 @@ async def export_docx(body: str = Body(..., media_type="text/plain")):
     path = os.path.join(EXPORT_DIR, "RFQ_Final.docx")
     open(path, "wb").write(file_bytes)
 
-    return {"path": path.replace("\\", "/")}
+    return FileResponse(path, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document", filename="RFQ_Final.docx")
 
 
 @app.post("/edit_rfq")
@@ -368,6 +416,24 @@ def list_documents():
     # Sort by newest first
     files.sort(key=lambda x: x["uploadedAt"], reverse=True)
     return files
+
+
+@app.get("/rfqs")
+def list_rfqs():
+    """
+    List all generated RFQs in the EXPORT_DIR.
+    """
+    if not os.path.exists(EXPORT_DIR):
+        return {"files": []}
+    
+    files = [f for f in os.listdir(EXPORT_DIR) if os.path.isfile(os.path.join(EXPORT_DIR, f))]
+    # Sort files by modification time (newest first)
+    files.sort(key=lambda x: os.path.getmtime(os.path.join(EXPORT_DIR, x)), reverse=True)
+    return {"files": files}
+
+
+# Mount the export directory for viewing PDFs
+app.mount("/rfq_pdf", StaticFiles(directory=settings.EXPORT_DIR), name="rfq_pdf")
 
 
 if __name__ == "__main__":
