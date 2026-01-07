@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { Trash2, Edit2, Check, X, File, FileText, Download } from 'lucide-react';
+import { Trash2, Edit2, Check, X, File, FileText, Download, RefreshCw, Zap, User, Bot } from 'lucide-react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ChatInterface } from '@/components/generator/ChatInterface';
 import { RFQPreview } from '@/components/generator/RFQPreview';
@@ -13,6 +13,9 @@ import {
   ResizablePanelGroup,
 } from '@/components/ui/resizable';
 import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
+import { Badge } from '@/components/ui/badge';
+import { ScrollArea } from '@/components/ui/scroll-area';
 
 const BACKEND = import.meta.env.VITE_BACKEND_URL || "http://127.0.0.1:8000";
 
@@ -28,7 +31,7 @@ export default function GenerateRFQ() {
       id: 'msg-init',
       role: 'assistant',
       content:
-        "Hello! I'm ready to help you draft a new Request for Quotation. What would you like to create today?",
+        "Hello! I'm ready to help you create a professional RFQ. What would you like to build today?",
       timestamp: new Date().toISOString(),
     },
   ]);
@@ -61,10 +64,26 @@ export default function GenerateRFQ() {
   const [retrievedRFQs, setRetrievedRFQs] = useState<RetrievedRFQ[]>([]);
   const [selectedRFQ, setSelectedRFQ] = useState<string | null>(null);
   const [referenceText, setReferenceText] = useState<string | null>(null);
-  const [draftText, setDraftText] = useState<string | null>(null);
 
-  // Editing state
-  const [isEditingMode, setIsEditingMode] = useState(false);
+  // DRAFTING STATE
+  const [draftText, setDraftText] = useState<string>("# New RFQ Spec\n\nStart typing or ask the Agent to generate content...");
+  const [draftMode, setDraftMode] = useState<'agent' | 'manual'>('agent');
+
+  const handleResetSession = () => {
+    if (confirm("Are you sure? This will clear the current draft and chat history.")) {
+      setMessages([{
+        id: 'msg-init-new',
+        role: 'assistant',
+        content: "Session reset. I'm ready to help you create a professional RFQ. What would you like to build today?",
+        timestamp: new Date().toISOString(),
+      }]);
+      setDraftText("# New RFQ Spec\n\n");
+      setRetrievedRFQs([]);
+      setSelectedRFQ(null);
+      setReferenceText(null);
+      localStorage.removeItem('rfq_chat_messages');
+    }
+  };
 
   const handleSendMessage = useCallback(
     async (content: string) => {
@@ -77,10 +96,9 @@ export default function GenerateRFQ() {
 
       setMessages((prev) => [...prev, userMessage]);
       setIsGenerating(true);
+      setAgentState({ phase: 'retrieve', progress: 20 });
 
       try {
-        // Send to /chat endpoint in the format backend expects
-        // Backend wants: { user_message: string, history: Array<{role, text}> }
         const history = messages.map(m => ({
           role: m.role === 'assistant' ? 'agent' : 'user',
           text: m.content
@@ -91,31 +109,52 @@ export default function GenerateRFQ() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             user_message: content,
-            history: history
+            history: history,
+            current_draft: draftText,
+            mode: draftMode
           }),
         });
 
         const data = await response.json();
+        setAgentState({ phase: 'draft', progress: 60 });
 
-        // Check for related documents
+        // Update Documents
         if (data.related_documents && data.related_documents.length > 0) {
           setRetrievedRFQs(data.related_documents);
-          // If docs found, clear previous selection/draft to show the list
-          setSelectedRFQ(null);
-          setReferenceText(null);
-          setDraftText(null);
+        }
+
+        // Update Draft (If Agent Edited)
+        if (data.updated_draft) {
+          setDraftText(data.updated_draft);
         }
 
         // Add LLM response to messages
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `msg-assistant-${Date.now()}`,
+        const assistantMsgs: ChatMessage[] = [];
+
+        assistantMsgs.push({
+          id: `msg-assistant-${Date.now()}`,
+          role: 'assistant',
+          content: data.reply,
+          timestamp: new Date().toISOString(),
+          sources: data.related_documents ? data.related_documents.map((d: any) => ({
+            name: d.file || d.name,
+            relevance: d.score || d.relevanceScore,
+            type: (d.file || d.name || '').endsWith('.pdf') ? 'pdf' : 'docx'
+          })) : undefined
+        });
+
+        // Add Impact Analysis if present
+        if (data.impact_analysis) {
+          assistantMsgs.push({
+            id: `msg-impact-${Date.now()}`,
             role: 'assistant',
-            content: data.reply,
+            content: `**Impact Analysis:**\n\n${data.impact_analysis}`,
             timestamp: new Date().toISOString(),
-          },
-        ]);
+          });
+        }
+
+        setMessages((prev) => [...prev, ...assistantMsgs]);
+
       } catch (error) {
         setMessages((prev) => [
           ...prev,
@@ -128,15 +167,17 @@ export default function GenerateRFQ() {
         ]);
       } finally {
         setIsGenerating(false);
+        setAgentState({ phase: 'idle', progress: 0 });
       }
     },
-    [messages]
-    [messages]
+    [messages, draftText, draftMode]
   );
 
   const handleDocumentSelect = async (filename: string) => {
     setSelectedRFQ(filename);
     try {
+      // If it's a PDF, we don't strictly need text for preview but good for context
+      // If it's Word/Text, we fetch text
       const res = await fetch(`${BACKEND}/rfq_text/${encodeURIComponent(filename)}`);
       const data = await res.json();
       setReferenceText(data.text);
@@ -156,72 +197,58 @@ export default function GenerateRFQ() {
 
     const blob = await res.blob();
     const url = window.URL.createObjectURL(blob);
-
     const a = document.createElement('a');
     a.href = url;
     a.download = 'RFQ.pdf';
     a.click();
-
     window.URL.revokeObjectURL(url);
-  };
-
-  // ------------------------------------------------------------------
-  // MANUAL EDIT HANDLER
-  // ------------------------------------------------------------------
-  const handleSaveEdit = async (newContent: string) => {
-    if (!draftText) return;
-
-    setIsGenerating(true);
-    // Switch off edit mode immediately so UI feels responsive
-    setIsEditingMode(false);
-    setAgentState({ phase: 'analyze', progress: 50 });
-
-    try {
-      // Analyze the change
-      const res = await fetch(`${BACKEND}/analyze_changes`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          old_text: draftText,
-          new_text: newContent,
-        }),
-      });
-
-      const data = await res.json();
-      setDraftText(newContent);
-
-      // Post analysis to chat
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `msg-analysis-${Date.now()}`,
-          role: 'assistant',
-          content: `**Manual Edit Analysis:**\n\n${data.analysis}`,
-          timestamp: new Date().toISOString(),
-        },
-      ]);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setIsGenerating(false);
-      setAgentState({ phase: 'idle', progress: 0 });
-    }
   };
 
   return (
     <MainLayout>
-      <div className="h-[calc(100vh-0px)]">
-        <ResizablePanelGroup direction="horizontal">
-          <ResizablePanel defaultSize={50} minSize={35}>
-            <div className="h-full flex flex-col border-r border-border">
-              <div className="flex items-center justify-between p-4 border-b border-border">
-                <div>
-                  <h1 className="text-lg font-semibold">Generate RFQ</h1>
-                  <p className="text-sm text-muted-foreground">
-                    Describe your requirements to the AI agent
-                  </p>
-                </div>
-              </div>
+      <div className="h-[calc(100vh-4rem)] flex flex-col overflow-hidden">
+        {/* --- Main Toolbar --- */}
+        <div className="border-b border-border bg-card p-3 flex items-center justify-between shadow-sm z-50 sticky top-0">
+          <div className="flex items-center gap-4">
+            <h1 className="text-lg font-bold bg-gradient-to-r from-primary to-blue-600 bg-clip-text text-transparent">RFQ Generator Mode</h1>
+            <div className="h-6 w-px bg-border"></div>
+            <div className="flex items-center gap-2 bg-muted/50 p-1 rounded-md">
+              <Button
+                variant={draftMode === 'manual' ? 'secondary' : 'ghost'}
+                size="sm"
+                className="h-7 px-3 text-xs"
+                onClick={() => setDraftMode('manual')}
+              >
+                <User className="w-3 h-3 mr-1" /> Manual
+              </Button>
+              <Button
+                variant={draftMode === 'agent' ? 'secondary' : 'ghost'}
+                size="sm"
+                className="h-7 px-3 text-xs"
+                onClick={() => setDraftMode('agent')}
+              >
+                <Bot className="w-3 h-3 mr-1" /> Agent
+              </Button>
+            </div>
+            {draftMode === 'agent' && <Badge variant="secondary" className="text-xs text-blue-600"><Zap className="w-3 h-3 mr-1 fill-blue-500" /> Auto-Edit Active</Badge>}
+          </div>
+
+          <div className="flex items-center gap-3">
+            <Button variant="outline" size="sm" onClick={handleResetSession} className="text-red-500 hover:text-red-600 hover:bg-red-50">
+              <RefreshCw className="w-4 h-4 mr-2" /> New RFQ
+            </Button>
+            <Button size="sm" onClick={handleExport}>
+              <Download className="w-4 h-4 mr-2" /> Export PDF
+            </Button>
+          </div>
+        </div>
+
+        <ResizablePanelGroup direction="horizontal" className="flex-1 overflow-hidden">
+          {/* --- LEFT PANEL: CHAT & DOCS --- */}
+          <ResizablePanel defaultSize={40} minSize={30}>
+            <div className="h-full flex flex-col border-r border-border bg-background">
+
+
 
               <div className="flex-1 overflow-hidden">
                 <ChatInterface
@@ -229,7 +256,7 @@ export default function GenerateRFQ() {
                   onSendMessage={handleSendMessage}
                   agentState={agentState}
                   isGenerating={isGenerating}
-                  onSourceClick={handleDocumentSelect}
+                  onSourceClick={handleDocumentSelect} // Keep for inline citations
                 />
               </div>
             </div>
@@ -237,142 +264,62 @@ export default function GenerateRFQ() {
 
           <ResizableHandle withHandle />
 
-          <ResizablePanel defaultSize={50} minSize={35}>
-            <div className="h-full bg-card/30 p-6 overflow-y-auto">
-              {/* Case 1: Show list of found documents */}
-              {retrievedRFQs.length > 0 && !selectedRFQ && !draftText && (
-                <>
-                  <h2 className="text-lg font-semibold mb-4">
-                    Found Documents
-                  </h2>
-                  <div className="space-y-3">
-                    {retrievedRFQs.map((rfq) => {
-                      const isPdf = rfq.file.toLowerCase().endsWith('.pdf');
-                      const iconColor = isPdf ? 'text-red-500' : 'text-blue-500';
-                      const bgColor = isPdf ? 'bg-red-50' : 'bg-blue-50';
+          {/* --- RIGHT PANEL: EDITOR / PREVIEW --- */}
+          <ResizablePanel defaultSize={60} minSize={30}>
+            <div className="h-full bg-card flex flex-col">
 
-                      return (
-                        <div
-                          key={rfq.file}
-                          className="flex items-center p-3 hover:bg-muted/50 transition-colors cursor-pointer border-b border-border last:border-0"
-                          onClick={() => handleDocumentSelect(rfq.file)}
-                        >
-                          {/* Icon Box */}
-                          <div className={`flex-shrink-0 w-10 h-10 rounded-lg ${bgColor} flex items-center justify-center mr-3`}>
-                            <FileText className={`w-5 h-5 ${iconColor}`} />
-                          </div>
-
-                          {/* Content */}
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-foreground truncate" title={rfq.file}>
-                              {rfq.file}
-                            </p>
-                          </div>
-
-                          {/* Match Score (Subtle) */}
-                          <span className="text-xs text-muted-foreground ml-2">
-                            {rfq.score}%
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </>
-              )}
-
-              {/* Case 2: Show selected reference document */}
-              {selectedRFQ && referenceText && !draftText && (
-                <div className="flex flex-col h-full">
-                  <div className="flex items-center justify-between mb-4">
-                    <Button variant="ghost" size="sm" onClick={() => setSelectedRFQ(null)}>
-                      ← Back to List
-                    </Button>
-                    <Button
-                      size="sm"
-                      onClick={() => {
-                        // Draft RFQ based on this reference
-                        // Trigger a new chat message to draft
-                        handleSendMessage(`Please draft a new RFQ using ${selectedRFQ} as a reference.`);
-                      }}
-                    >
-                      Draft from this
-                    </Button>
-                  </div>
-                  <div className="flex-1 overflow-auto border rounded-md p-0 bg-background h-full">
-                    {selectedRFQ.toLowerCase().endsWith('.pdf') ? (
-                      <iframe
-                        src={`${BACKEND}/documents/${selectedRFQ}/view`}
-                        className="w-full h-full border-0"
-                        title="Document Preview"
-                      />
-                    ) : (
-                      <div className="flex flex-col h-full bg-background relative">
-                        {/* Header for Editor */}
-                        <div className="flex items-center justify-between px-4 py-2 border-b bg-muted/20">
-                          <span className="text-xs font-mono text-muted-foreground">{selectedRFQ}</span>
-                          <div className="flex gap-2">
-                            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => window.open(`${BACKEND}/documents/${selectedRFQ}/view`, '_blank')}>
-                              <Download className="w-3 h-3 mr-1" /> Original
-                            </Button>
-                            <Button size="sm" className="h-7 text-xs" onClick={() => {
-                              setDraftText(referenceText);
-                              setSelectedRFQ(null);
-                            }}>
-                              <FileText className="w-3 h-3 mr-1" /> Switch to Full Draft Mode
-                            </Button>
-                          </div>
-                        </div>
-
-                        {/* Editable Text Area (Acts as "Manual Editing") */}
-                        <textarea
-                          className="flex-1 w-full p-4 resize-none bg-background focus:outline-none font-mono text-sm leading-relaxed"
-                          value={referenceText}
-                          onChange={(e) => {
-                            // "Manual Editing" Logic:
-                            // If they type here, we treat it as starting a draft/edit session
-                            // We update the local state. Ideally we should switch to 'draftText' mode immediately
-                            // to unlock all draft features, but user wants editing "in the right side".
-                            // Let's simpler: Update referenceText? No, referenceText is fetched.
-                            // We should auto-promote to Draft Mode on edit.
-                            setDraftText(e.target.value);
-                            setSelectedRFQ(null); // This switches the VIEW to Case 3 (Draft Preview) which has the full editor
-                          }}
-                          placeholder="Loading document text..."
-                        />
-                      </div>
-                    )}
-                  </div>
+              {selectedRFQ && (
+                <div className="flex-shrink-0 bg-muted/30 border-b border-border p-2 flex items-center justify-between">
+                  <span className="text-sm font-medium flex items-center gap-2">
+                    <File className="w-4 h-4" /> Viewing: {selectedRFQ}
+                  </span>
+                  <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => setSelectedRFQ(null)}>
+                    <X className="w-3 h-3 mr-1" /> Close Preview
+                  </Button>
                 </div>
               )}
 
-              {/* Case 3: Show generated draft */}
-              {draftText ? (
-                <RFQPreview
-                  isVisible={true}
-                  content={draftText}
-                  onExport={handleExport}
-                  onEdit={() => setIsEditingMode(true)}
-                  isEditing={isEditingMode}
-                  onSave={handleSaveEdit}
-                  onCancel={() => setIsEditingMode(false)}
-                />
-              ) : (
-                // Case 4: Empty state (only if no list and no draft)
-                !retrievedRFQs.length && (
-                  <div className="flex items-center justify-center h-full text-center">
-                    <div>
-                      <p className="text-muted-foreground mb-2">No documents selected</p>
-                      <p className="text-sm text-muted-foreground">
-                        Ask the assistant to search or draft an RFQ
-                      </p>
+              <div className="flex-1 overflow-hidden relative">
+                {selectedRFQ ? (
+                  /* Document Preview Mode */
+                  selectedRFQ.toLowerCase().endsWith('.pdf') ? (
+                    <iframe
+                      src={`${BACKEND}/documents/${selectedRFQ}/view`}
+                      className="w-full h-full border-0"
+                      title="Preview"
+                    />
+                  ) : (
+                    <div className="p-8 h-full overflow-y-auto bg-white">
+                      <pre className="whitespace-pre-wrap font-sans text-sm">{referenceText || "Loading..."}</pre>
                     </div>
+                  )
+                ) : (
+                  /* Persistent Draft Editor */
+                  <textarea
+                    className={`w-full h-full p-8 resize-none focus:outline-none font-mono text-sm leading-relaxed transition-colors ${draftMode === 'agent' ? 'bg-muted/5' : 'bg-background'}`}
+                    value={draftText}
+                    onChange={(e) => setDraftText(e.target.value)}
+                    placeholder="# Start your RFQ here..."
+                  />
+                )}
+
+                {/* Floating Action for selected doc (optional) */}
+                {selectedRFQ && referenceText && (
+                  <div className="absolute bottom-4 right-4 shadow-lg">
+                    <Button size="sm" onClick={() => {
+                      setDraftText(referenceText);
+                      setSelectedRFQ(null);
+                    }}>
+                      Replace Draft with This
+                    </Button>
                   </div>
-                )
-              )}
+                )}
+              </div>
             </div>
           </ResizablePanel>
         </ResizablePanelGroup>
       </div>
+
     </MainLayout>
   );
 }

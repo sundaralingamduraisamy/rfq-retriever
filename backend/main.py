@@ -17,7 +17,7 @@ from database import db
 from core.retriever import hybrid_search, get_full_rfq
 from core.ingestion import indexer
 from render import render_pdf, render_docx
-from core.llm_agent import chat_with_llm
+from core.llm_agent import chat_with_llm, agent
 from core.prompt_loader import load_prompt
 from settings import settings
 
@@ -68,6 +68,8 @@ class ChatModel(BaseModel):
     history: list
     user_message: str
     selected_rfq: str | None = None
+    current_draft: str | None = None
+    mode: str = "agent"  # 'agent' or 'manual'
 
 class ChangeModel(BaseModel):
     old_text: str
@@ -237,32 +239,32 @@ def chat(req: ChatModel):
     if req.user_message == "start_session":
          return {"reply": "Hi! I'm your RFQ Assistant. I can help you draft, validate, and search your RFQs."}
 
-    system_prompt = load_prompt("chat_system_prompt.md")
-    messages = [{"role": "system", "content": system_prompt}]
-
+    # Prepare messages
+    messages = []
     for m in req.history:
         messages.append({
-            "role": "assistant" if m["role"] == "agent" else "user",
-            "content": m["text"]
+            "role": m.get("role", "user"),
+            "content": m.get("text", "") or m.get("content", "")
         })
+    
+    # Add context if selected_rfq is provided but no draft (Reference Context)
+    if req.selected_rfq and not req.current_draft:
+         try:
+             rfq_text = get_full_rfq(req.selected_rfq)
+             messages.append({"role": "system", "content": f"User is viewing reference document: {req.selected_rfq}\nContent:\n{rfq_text}"})
+         except: pass
 
-    if req.selected_rfq:
-        try:
-            # Fetch from DB now
-            rfq_text = get_full_rfq(req.selected_rfq)
-            messages.append({
-                "role": "system",
-                "content": f"Reference RFQ document content:\n{rfq_text}"
-            })
-        except:
-            pass
-
+    # Add current message
     messages.append({"role": "user", "content": req.user_message})
 
-    reply, related_docs = chat_with_llm(messages)
+    # Call Agent
+    reply, docs, update_info = agent.process(messages, current_draft=req.current_draft, mode=req.mode)
+    
     return {
-        "reply": clean_rfq_text(reply),
-        "related_documents": related_docs
+        "reply": reply,
+        "related_documents": docs, 
+        "updated_draft": update_info["updated_text"] if update_info else None,
+        "impact_analysis": update_info["analysis"] if update_info else None
     }
 
 @app.post("/validate_requirement")

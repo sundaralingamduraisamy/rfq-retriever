@@ -171,21 +171,39 @@ export function ChatInterface({
                 )}
               </div>
 
-              {/* Sources */}
+              {/* Sources - Perplexity Style (Bottom Row) */}
               {message.sources && message.sources.length > 0 && (
-                <div className="flex flex-wrap gap-2 pt-1 pl-1">
-                  {message.sources.map((source) => (
-                    <div
-                      key={source.name}
-                      onClick={() => onSourceClick?.(source.name)}
-                      className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-background border border-border text-xs shadow-sm hover:border-primary hover:text-primary transition-all cursor-pointer hover:bg-primary/5"
-                    >
-                      <FileText className="w-3 h-3 text-primary" />
-                      <span className="font-medium truncate max-w-[120px]">
-                        {source.name}
-                      </span>
-                    </div>
-                  ))}
+                <div className="mt-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Sparkles className="w-3 h-3 text-primary" />
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Sources</span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {message.sources.map((source, idx) => (
+                      <div
+                        key={idx}
+                        onClick={() => onSourceClick?.(source.name)}
+                        className="group flex flex-col justify-between w-[140px] h-[70px] p-2 rounded-lg bg-card border border-border hover:border-primary/50 hover:bg-muted/50 transition-all cursor-pointer shadow-sm"
+                      >
+                        <p className="text-xs font-medium text-foreground line-clamp-2 leading-tight" title={source.name}>
+                          {source.name}
+                        </p>
+                        <div className="flex items-center justify-between mt-auto w-full">
+                          <div className="flex items-center gap-1.5">
+                            <div className={`w-1.5 h-1.5 rounded-full ${source.name.endsWith('.pdf') ? 'bg-red-500' : 'bg-blue-500'}`} />
+                            <span className="text-[10px] text-muted-foreground capitalize">
+                              {source.name.split('.').pop()}
+                            </span>
+                          </div>
+                          {source.relevance !== undefined && (
+                            <span className="text-[10px] font-medium text-muted-foreground bg-muted/50 px-1.5 py-0.5 rounded">
+                              {Math.round(source.relevance)}%
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
@@ -195,7 +213,7 @@ export function ChatInterface({
       </div>
 
       {/* Input Area */}
-      <div className="p-4 bg-background border-t border-border">
+      <div className="p-4 bg-background border-t border-border sticky bottom-0 z-20">
         <form
           onSubmit={handleSubmit}
           className="relative rounded-xl border border-border bg-card shadow-sm hover:border-primary/50 focus-within:ring-1 focus-within:ring-primary focus-within:border-primary transition-all overflow-hidden"
@@ -203,7 +221,7 @@ export function ChatInterface({
           <Textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Describe your requirements (e.g. 'Add a clause about recycling')..."
+            placeholder="Ask a follow-up or describe requirements..."
             className="w-full min-h-[60px] max-h-[200px] resize-none border-0 focus-visible:ring-0 bg-transparent py-4 pl-4 pr-14 placeholder:text-muted-foreground/50 leading-relaxed"
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
