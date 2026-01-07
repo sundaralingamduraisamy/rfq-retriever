@@ -1,119 +1,115 @@
-import os
-import json
-import numpy as np
-from PyPDF2 import PdfReader
-
+from datetime import datetime
+from sentence_transformers import SentenceTransformer
+from database import db
 from settings import settings
+import time
 
-CHUNK_FILE = settings.CHUNK_INDEX_FILE
+from core.embedding_model import get_embedding_model
 
+# Initialize model lazily in functions
+# embedding_model = SentenceTransformer(settings.EMBEDDING_MODEL_NAME)
 
-# --------------------------------
-# Safe Load Chunk Index
-# --------------------------------
-def load_chunks():
-    if not os.path.exists(CHUNK_FILE):
-        print("❌ chunk_index.json not found. You MUST run ingestion first.")
+def hybrid_search(query: str):
+    """
+    Search for documents using Vector Similarity on Summaries
+    """
+    start_time = time.time()
+    
+    if not db:
+        print("❌ Database not initialized")
         return []
 
-    with open(CHUNK_FILE, "r", encoding="utf-8") as f:
-        data = json.load(f)
+    try:
+        # 1. Encode Query
+        model = get_embedding_model()
+        query_vec = model.encode(query)
+        embedding_str = str(query_vec.tolist())
 
-    # Ensure every chunk has required keys
-    safe_chunks = []
-    for i, c in enumerate(data):
-        safe_chunks.append({
-            "text": c.get("text", ""),
-            "file": c.get("file", "UNKNOWN_FILE"),
-            "chunk_id": c.get("chunk_id", i),
-            "embedding": c.get("embedding", [])
-        })
+        # 2. Search in DB (Cosine Distance)
+        # We search document_summaries via summary_embeddings table
+        # 1 - (embedding <=> query) = Cosine Similarity
+        sql_query = """
+            SELECT 
+                d.filename,
+                ds.summary_text,
+                1 - (se.embedding <=> %s::vector) as similarity,
+                ds.id as summary_id
+            FROM summary_embeddings se
+            JOIN document_summaries ds ON se.summary_id = ds.id
+            JOIN documents d ON ds.document_id = d.id
+            ORDER BY similarity DESC
+            LIMIT %s
+        """
 
-    print(f"✅ Loaded {len(safe_chunks)} chunks")
-    return safe_chunks
-
-
-CHUNKS = load_chunks()
-
-
-# --------------------------------
-# Cosine Similarity
-# --------------------------------
-def cosine(a, b):
-    a = np.array(a)
-    b = np.array(b)
-
-    if len(a) == 0 or len(b) == 0:
-        return 0.0
-
-    return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
-
-
-# --------------------------------
-# Hybrid Search
-# --------------------------------
-def hybrid_search(query):
-    from core.embedding import get_embedding
-
-    if not CHUNKS:
-        return []
-
-    query_vec = get_embedding(query)
-
-    scored = []
-
-    for c in CHUNKS:
-        emb = c["embedding"]
-
-        # Fix stored as string
-        if isinstance(emb, str):
-            try:
-                emb = json.loads(emb)
-            except:
-                emb = []
-
-        score = cosine(query_vec, emb)
-
-        scored.append({
-            "text": c["text"],
-            "relevance": round(score * 100, 2),
-            "source": {
-                "file": c["file"],
-                "chunk_id": c["chunk_id"]
-            }
-        })
-
-    scored.sort(key=lambda x: x["relevance"], reverse=True)
-
-    # Deduplicate by file (return only the highest scoring chunk per file)
-    unique_results = []
-    seen_files = set()
-
-    for item in scored:
-        fname = item["source"]["file"]
-        if fname not in seen_files:
-            unique_results.append(item)
-            seen_files.add(fname)
+        results = db.execute_query(sql_query, (embedding_str, settings.RETRIEVER_TOP_K))
         
-        if len(unique_results) >= settings.RETRIEVER_TOP_K:
-            break
+        # 3. Format Results
+        formatted_results = []
+        for r in results:
+            filename = r[0]
+            summary_text = r[1]
+            similarity = float(r[2])
+            summary_id = r[3]
 
-    return unique_results
+            formatted_results.append({
+                "source": {
+                    "file": filename,
+                    "chunk_id": summary_id # Map summary_id to "chunk_id" for compatibility
+                },
+                "text": summary_text, # The AI sees the summary
+                "relevance": round(similarity * 100, 2)
+            })
 
+        print(f"✅ Search found {len(formatted_results)} results in {(time.time() - start_time)*1000:.1f}ms")
+        return formatted_results
 
-# --------------------------------
-# Read Full RFQ
-# --------------------------------
-def get_full_rfq(filename):
-    path = os.path.join(settings.DATA_DIR, filename)
+    except Exception as e:
+        print(f"❌ Search error: {e}")
+        return []
 
-    if not os.path.exists(path):
-        return "RFQ file not found."
+def get_full_rfq(filename: str) -> str:
+    """
+    Retrieve full text content from DB for a given filename.
+    Supports both PDF and DOCX files.
+    """
+    if not db:
+        return "Database not connection."
 
-    reader = PdfReader(path)
-    text = ""
+    try:
+        # Fetch binary content
+        row = db.execute_query_single("SELECT file_content FROM documents WHERE filename = %s", (filename,))
+        if not row:
+            return "Document not found in database."
+        
+        file_content = bytes(row[0])
+        file_ext = filename.split('.')[-1].lower()
+        
+        # Extract Text based on file type
+        if file_ext == 'pdf':
+            import fitz
+            doc = fitz.open(stream=file_content, filetype="pdf")
+            text = ""
+            for page in doc:
+                text += page.get_text()
+            doc.close()
+            
+        elif file_ext == 'docx':
+            import docx
+            import io
+            doc = docx.Document(io.BytesIO(file_content))
+            text = ""
+            for paragraph in doc.paragraphs:
+                text += paragraph.text + "\n"
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        text += cell.text + " "
+                text += "\n"
+        else:
+            return f"Unsupported file type: {file_ext}"
+            
+        return text.strip()
 
-    for page in reader.pages:
-        text += (page.extract_text() or "") + "\n"
-
-    return text.strip()
+    except Exception as e:
+        print(f"❌ Error reading full document: {e}")
+        return "Error reading document."

@@ -1,70 +1,159 @@
-import os
-import json
-from pypdf import PdfReader
-from docx import Document
+import fitz  # PyMuPDF
+from datetime import datetime
 from sentence_transformers import SentenceTransformer
+from database import db
+from settings import settings
+from core.llm_provider import get_llm
+from langchain_core.messages import HumanMessage, SystemMessage
 
-model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+# Initialize models
+# embedding_model = SentenceTransformer(settings.EMBEDDING_MODEL_NAME) # Lazy loaded now
+llm = get_llm()
 
-def load_pdf(path):
-    text = ""
-    reader = PdfReader(path)
-    for p in reader.pages:
-        text += p.extract_text() or ""
-    return text
+from core.embedding_model import get_embedding_model
 
-def load_docx(path):
-    doc = Document(path)
-    return "\n".join(p.text for p in doc.paragraphs)
+class EmbeddingIndexer:
+    """
+    Extract → Summarize → Embed → Store
+    """
 
-def chunk_text(text, size=900, overlap=700):
-    chunks = []
-    start = 0
-    while start < len(text):
-        chunk = text[start:start+size]
-        chunks.append(chunk)
-        start += overlap
-    return chunks
+    def __init__(self):
+        # DB Tables are now created in main.py on startup
+        pass
 
-def ingest(folder="data"):
-    # Always overwrite for now to ensure freshness
-    print(f"I will ingest documents from {folder}...")
+    def summarize(self, text: str) -> str:
+        """Summarize document using configured LLM"""
+        try:
+            # Use full text (relying on model context window)
+            messages = [
+                SystemMessage(
+                    content="You are a technical document summarizer. Summarize focusing on: 1) Main services/products, 2) Key requirements, 3) Important constraints, 4) Timeline/pricing. Keep concise and structured."
+                ),
+                HumanMessage(
+                    content=f"Summarize this RFQ document:\n\n{text}"
+                )
+            ]
 
-    entries = []
+            response = llm.invoke(messages)
+            return response.content
+        except Exception as e:
+            print(f"⚠️ Summarization failed: {e}")
+            return text[:1000] # Fallback
 
-    if not os.path.exists(folder):
-        print(f"Folder {folder} does not exist.")
-        return
+    def index_document(self, filename: str, file_content: bytes, category: str = "General") -> bool:
+        """
+        Main indexing function:
+        1. Store PDF binary in DB with category
+        2. Extract Text
+        3. Summarize
+        4. Embed
+        5. Store Vectors
+        """
+        try:
+            print(f"\n📄 Indexing: {filename} (Category: {category})")
 
-    for fname in os.listdir(folder):
-        path = os.path.join(folder, fname)
+            # 1. Store/Update Document Record with category
+            db.execute_update(
+                """
+                INSERT INTO documents (filename, category, file_size, file_content, uploaded_at)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (filename) DO UPDATE 
+                SET category = EXCLUDED.category,
+                    file_size = EXCLUDED.file_size,
+                    file_content = EXCLUDED.file_content,
+                    uploaded_at = EXCLUDED.uploaded_at
+                """,
+                (filename, category, len(file_content), file_content, datetime.now())
+            )
 
-        if fname.endswith(".pdf"):
-            print(f"Processing {fname}...")
-            text = load_pdf(path)
-        elif fname.endswith(".docx"):
-            print(f"Processing {fname}...")
-            text = load_docx(path)
-        else:
-            continue
+            # Get Document ID
+            doc_id_row = db.execute_query_single("SELECT id FROM documents WHERE filename = %s", (filename,))
+            if not doc_id_row:
+                return False
+            doc_id = doc_id_row[0]
 
-        text_chunks = chunk_text(text)
-        print(f"  - Generated {len(text_chunks)} chunks. Generating embeddings...")
+            # 2. Extract Text based on file type
+            file_ext = filename.split('.')[-1].lower()
+            
+            if file_ext == 'pdf':
+                # PDF extraction using PyMuPDF
+                doc = fitz.open(stream=file_content, filetype="pdf")
+                full_text = ""
+                for page in doc:
+                    full_text += page.get_text()
+                doc.close()
+                
+            elif file_ext == 'docx':
+                # DOCX extraction using python-docx
+                import docx
+                import io
+                doc = docx.Document(io.BytesIO(file_content))
+                full_text = ""
+                for paragraph in doc.paragraphs:
+                    full_text += paragraph.text + "\n"
+                # Also extract text from tables
+                for table in doc.tables:
+                    for row in table.rows:
+                        for cell in row.cells:
+                            full_text += cell.text + " "
+                    full_text += "\n"
+            else:
+                print(f"❌ Unsupported file type: {file_ext}")
+                return False
 
-        embeddings = model.encode(text_chunks)
+            if not full_text.strip():
+                print("❌ No text extracted")
+                return False
 
-        for i, chunk in enumerate(text_chunks):
-            entries.append({
-                "file": fname,
-                "chunk_id": i,
-                "text": chunk,
-                "embedding": embeddings[i].tolist()
-            })
+            # 3. Summarize
+            print("   Generating summary...")
+            summary = self.summarize(full_text)
+            print(f"   ✅ Model Summary:\n{summary}\n")
+            
+            # 4. Embed
+            print("   Generating embedding...")
+            model = get_embedding_model()
+            embedding = model.encode(summary)
+            embedding_str = str(embedding.tolist())
 
-    with open("chunk_index.json", "w", encoding="utf-8") as f:
-        json.dump(entries, f, ensure_ascii=False, indent=2)
+            # 5. Store Summary & Embedding
+            # Store Summary
+            db.execute_update(
+                """
+                INSERT INTO document_summaries (document_id, summary_text, word_count)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (document_id) DO UPDATE 
+                SET summary_text = EXCLUDED.summary_text,
+                    word_count = EXCLUDED.word_count
+                """,
+                (doc_id, summary, len(summary.split()))
+            )
 
-    print(f"✅ Chunk Index Created Successfully with {len(entries)} chunks.")
+            # Get Summary ID
+            summary_id_row = db.execute_query_single("SELECT id FROM document_summaries WHERE document_id = %s", (doc_id,))
+            if not summary_id_row:
+                return False
+            summary_id = summary_id_row[0]
 
-if __name__ == "__main__":
-    ingest()
+            # Store Vector
+            db.execute_update(
+                """
+                INSERT INTO summary_embeddings (summary_id, embedding)
+                VALUES (%s, %s)
+                ON CONFLICT (summary_id) DO UPDATE 
+                SET embedding = EXCLUDED.embedding
+                """,
+                (summary_id, embedding_str)
+            )
+
+            print(f"✅ Successfully indexed {filename}")
+            return True
+
+        except Exception as e:
+            print(f"❌ Indexing error: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+# Global instance
+indexer = EmbeddingIndexer()

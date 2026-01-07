@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Search,
   Upload,
@@ -38,9 +38,20 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
-import { API_BASE_URL } from '@/api';
+
+import { API_BASE_URL, uploadDocument, deleteDocument } from '@/api';
 
 const fileIcons: Record<string, any> = {
   pdf: FileText,
@@ -72,6 +83,13 @@ export default function DocumentLibrary() {
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('All Categories');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('list');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [docToDelete, setDocToDelete] = useState<Document | null>(null);
+  const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [category, setCategory] = useState('General');
 
   useEffect(() => {
     fetchDocuments();
@@ -101,6 +119,82 @@ export default function DocumentLibrary() {
     return matchesSearch && matchesCategory;
   });
 
+  const handleUploadClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    // Store file and show category dialog
+    setPendingFile(file);
+    setCategoryDialogOpen(true);
+  };
+
+  const handleCategorySubmit = async () => {
+    if (!pendingFile) return;
+
+    try {
+      setUploading(true);
+      setCategoryDialogOpen(false);
+
+      // Create FormData with file and category
+      const formData = new FormData();
+      formData.append('file', pendingFile);
+      formData.append('category', category);
+
+      const response = await fetch(`${API_BASE_URL}/upload`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) throw new Error('Upload failed');
+
+      // Refresh list
+      await fetchDocuments();
+
+      // Reset
+      setPendingFile(null);
+      setCategory('General');
+    } catch (error) { // eslint-disable-next-line
+      alert("Upload failed: " + (error as any).message);
+    } finally {
+      setUploading(false);
+      // Reset input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const handleView = (doc: Document) => {
+    window.open(`${API_BASE_URL}/data/${doc.name}`, '_blank');
+  };
+
+  const handleDownload = (doc: Document) => {
+    window.open(`${API_BASE_URL}/data/${doc.name}`, '_blank');
+  };
+
+  const handleDelete = (doc: Document) => {
+    setDocToDelete(doc);
+    setDeleteDialogOpen(true);
+  };
+
+  const confirmDelete = async () => {
+    if (!docToDelete) return;
+
+    try {
+      await deleteDocument(docToDelete.name);
+      await fetchDocuments();
+    } catch (error) { // eslint-disable-next-line
+      alert("Delete failed: " + (error as any).message);
+    } finally {
+      setDeleteDialogOpen(false);
+      setDocToDelete(null);
+    }
+  };
+
   // Calculate stats
   const totalDocs = documents.length;
   // Get unique categories from actual data
@@ -118,10 +212,17 @@ export default function DocumentLibrary() {
               Manage your knowledge base of historical RFQs and templates
             </p>
           </div>
-          <Button className="gap-2">
+          <Button className="gap-2" onClick={handleUploadClick} disabled={uploading}>
             <Upload className="w-4 h-4" />
-            Upload Document
+            {uploading ? "Uploading..." : "Upload Document"}
           </Button>
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleFileChange}
+            className="hidden"
+            accept=".pdf,.doc,.docx"
+          />
         </div>
 
         {/* Stats */}
@@ -245,7 +346,7 @@ export default function DocumentLibrary() {
                             {(doc.size / 1024).toFixed(1)} KB
                           </TableCell>
                           <TableCell className="text-muted-foreground">
-                            {format(new Date(doc.uploadedAt), 'MMM d, yyyy')}
+                            {format(new Date(doc.uploadedAt), 'MMM d, yyyy h:mm a')}
                           </TableCell>
                           <TableCell>
                             <DropdownMenu>
@@ -255,16 +356,19 @@ export default function DocumentLibrary() {
                                 </Button>
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end">
-                                <DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => handleView(doc)}>
                                   <Eye className="w-4 h-4 mr-2" />
                                   View
                                 </DropdownMenuItem>
-                                <DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => handleDownload(doc)}>
                                   <Download className="w-4 h-4 mr-2" />
                                   Download
                                 </DropdownMenuItem>
                                 <DropdownMenuSeparator />
-                                <DropdownMenuItem className="text-destructive">
+                                <DropdownMenuItem
+                                  className="text-destructive"
+                                  onClick={() => handleDelete(doc)}
+                                >
                                   <Trash2 className="w-4 h-4 mr-2" />
                                   Delete
                                 </DropdownMenuItem>
@@ -306,16 +410,19 @@ export default function DocumentLibrary() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleView(doc)}>
                               <Eye className="w-4 h-4 mr-2" />
                               View
                             </DropdownMenuItem>
-                            <DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleDownload(doc)}>
                               <Download className="w-4 h-4 mr-2" />
                               Download
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
-                            <DropdownMenuItem className="text-destructive">
+                            <DropdownMenuItem
+                              className="text-destructive"
+                              onClick={() => handleDelete(doc)}
+                            >
                               <Trash2 className="w-4 h-4 mr-2" />
                               Delete
                             </DropdownMenuItem>
@@ -348,13 +455,70 @@ export default function DocumentLibrary() {
               Try adjusting your search or filters, or upload new documents to
               your knowledge base.
             </p>
-            <Button>
+            <Button onClick={handleUploadClick} disabled={uploading}>
               <Upload className="w-4 h-4 mr-2" />
               Upload Document
             </Button>
           </div>
         )}
       </div>
+
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone. This will permanently delete
+              <span className="font-semibold text-foreground"> {docToDelete?.name} </span>
+              from the document library.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setDocToDelete(null)}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDelete} className="bg-destructive hover:bg-destructive/90">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Category Dialog */}
+      <AlertDialog open={categoryDialogOpen} onOpenChange={setCategoryDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Upload Document</AlertDialogTitle>
+            <AlertDialogDescription>
+              Select a category/department for this document
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="py-4">
+            <Select value={category} onValueChange={setCategory}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select category..." />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Design">Design</SelectItem>
+                <SelectItem value="Safety">Safety</SelectItem>
+                <SelectItem value="Quality">Quality</SelectItem>
+                <SelectItem value="Manufacturing">Manufacturing</SelectItem>
+                <SelectItem value="General">General</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => {
+              setPendingFile(null);
+              setCategory('General');
+              if (fileInputRef.current) fileInputRef.current.value = '';
+            }}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={handleCategorySubmit}>
+              Upload
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </MainLayout>
   );
 }

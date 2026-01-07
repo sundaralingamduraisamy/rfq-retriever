@@ -1,166 +1,264 @@
-import operator
-from typing import Annotated, List, TypedDict, Union
+from typing import List, Dict
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 
-
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, BaseMessage
-from langgraph.graph import StateGraph, END
-
+# Import existing singletons/config
 from settings import settings
-
-# ------------------------------------------------------------------
-# 1. Setup LLM
-# ------------------------------------------------------------------
+from database import db
 from core.llm_provider import llm
-from core.prompt_loader import load_prompt
+from core.retriever import hybrid_search
 
-# ------------------------------------------------------------------
-# 2. Define State
-# ------------------------------------------------------------------
-class AgentState(TypedDict):
-    messages: Annotated[List[BaseMessage], operator.add]
-    intent: str
 
-# ------------------------------------------------------------------
-# 3. Define Prompts
-# ------------------------------------------------------------------
-SYSTEM_PROMPT_GENERAL = load_prompt("general_agent_system.md")
-SYSTEM_PROMPT_DRAFTER = load_prompt("drafter_agent_system.md")
-
-# ------------------------------------------------------------------
-# 4. Define Nodes
-# ------------------------------------------------------------------
-def router_node(state: AgentState):
+class ChatAgent:
     """
-    Simple heuristic router to decide intent.
-    In a real agent, this could be an LLM call.
+    Simple agentic RAG without langchain.agents dependency
     """
-    messages = state["messages"]
-    last_msg = messages[-1].content.lower() if messages else ""
-    
-    triggers = [
-        "apply", "update rfq", "generate final rfq", 
-        "draft rfq", "final structured rfq", 
-        "apply recommended changes", "update document"
-    ]
-    
-    if any(t in last_msg for t in triggers):
-        return {"intent": "draft"}
-    return {"intent": "chat"}
 
-def general_chat_node(state: AgentState):
-    messages = state["messages"]
-    # Prepend system prompt if not present (or we can just let the graph handle it dynamically)
-    # For a simple chat, we just invoke the LLM
-    
-    # We want to force the system prompt behavior
-    conversation = [SystemMessage(content=SYSTEM_PROMPT_GENERAL)] + messages
-    response = llm.invoke(conversation)
-    return {"messages": [response]}
+    def __init__(self):
+        self.tools = self._define_tools()
 
-def drafter_node(state: AgentState):
-    messages = state["messages"]
-    # For drafting, we might want to ignore history or use it as context. 
-    # Usually drafting needs the specific instructions.
-    
-    # We will use the generic system prompt for drafting
-    conversation = [SystemMessage(content=SYSTEM_PROMPT_DRAFTER)] + messages
-    response = llm.invoke(conversation)
-    return {"messages": [response]}
+    def _define_tools(self):
+        """Define available tools"""
+        return {
+            "search_documents": self._search_documents,
+            "list_all_documents": self._list_all_documents,
+            "get_full_summary": self._get_full_summary,
+        }
 
-# ------------------------------------------------------------------
-# 5. Build Graph
-# ------------------------------------------------------------------
-workflow = StateGraph(AgentState)
+    def _search_documents(self, query: str):
+        """Search indexed documents using vector similarity"""
+        print(f"\n   🔧 Tool: search_documents('{query}')")
+        results = hybrid_search(query)
 
-workflow.add_node("router", router_node)
-workflow.add_node("general_chat", general_chat_node)
-workflow.add_node("drafter", drafter_node)
+        if not results:
+            return "No matching documents found.", []
 
-workflow.set_entry_point("router")
-
-def route_decision(state: AgentState):
-    if state["intent"] == "draft":
-        return "drafter"
-    return "general_chat"
-
-workflow.add_conditional_edges(
-    "router",
-    route_decision,
-    {
-        "drafter": "drafter",
-        "general_chat": "general_chat"
-    }
-)
-
-workflow.add_edge("general_chat", END)
-workflow.add_edge("drafter", END)
-
-app = workflow.compile()
-
-# ------------------------------------------------------------------
-# 6. Legacy Adapter
-# ------------------------------------------------------------------
-def normalize_role(role):
-    if role == "agent":
-        return "assistant"
-    if role in ["assistant", "system", "user"]:
-        return role
-    return "user"
-
-def chat_with_llm(messages: List[dict]):
-    """
-    Adapter function to maintain compatibility with main.py
-    Input: List of dicts [{"role": "user", "content": "..."}]
-    Output: String response
-    """
-    
-    # Convert dict messages to LangChain messages
-    langchain_messages = []
-    custom_system_content_for_bypass = None
-    
-    for m in messages:
-        role = normalize_role(m.get("role"))
-        content = m.get("content") or m.get("text") or ""
+        summary = f"Found {len(results)} relevant documents:\n\n"
+        found_docs = []
         
-        if role == "system":
-            # Check if this is the main default prompt (which we want to ignore in favor of Graph prompts)
-            if "STRICT RULES" in content and "Reference RFQ" not in content:
-                continue
+        for i, item in enumerate(results, 1):
+            src = item["source"]
+            preview = item["text"][:200].replace("\n", " ")
+            summary += f"{i}. [{src['file']}] (Relevance: {item['relevance']}%)\n"
+            summary += f"   Preview: {preview}...\n"
+            summary += f"   Full Summary: {item['text']}\n\n"
             
-            # Check for bypass keywords (Validator, Impact Analysis, Direct Drafter)
-            # These are specific "functions" called by main.py that shouldn't go through the conversational router
-            lower_content = content.lower()
-            if any(k in lower_content for k in ["validator", "impact analysis", "drafting agent"]):
-                custom_system_content_for_bypass = content
-                continue
-            
-            # If it's "Reference RFQ" or other context, we KEEP it as a system message
-            langchain_messages.append(SystemMessage(content=content))
-        
-        elif role == "user":
-            langchain_messages.append(HumanMessage(content=content))
-        elif role == "assistant":
-            langchain_messages.append(AIMessage(content=content))
-            
-    # If we detected a custom system (like validator), bypass the graph
-    if custom_system_content_for_bypass:
-        msgs = [SystemMessage(content=custom_system_content_for_bypass)] + langchain_messages
-        # We invoke the LLM directly
-        res = llm.invoke(msgs)
-        return res.content
+            # Add to found list
+            found_docs.append({
+                "file": src["file"],
+                "score": item["relevance"],
+                "preview": preview
+            })
 
-    # Otherwise, use the LangGraph Agent
-    try:
-        inputs = {"messages": langchain_messages}
-        result = app.invoke(inputs)
-        
-        # Extract the last message
-        last_message = result["messages"][-1]
-        return last_message.content
+        return summary, found_docs
 
-    except Exception as e:
-        print(f"❌ Graph Error in chat_with_llm: {e}")
-        import traceback
-        traceback.print_exc()
-        # Fallback error message
-        return "I'm having trouble connecting to the AI agent right now. Please check your connection or API key."
+    def _get_full_summary(self, filename: str):
+        """Get the complete summary text of a document by filename"""
+        row = db.execute_query_single(
+            """
+            SELECT ds.summary_text 
+            FROM document_summaries ds
+            JOIN documents d ON ds.document_id = d.id
+            WHERE d.filename = %s
+            """,
+            (filename,)
+        )
+        if row:
+            return f"Complete summary for {filename}:\n{row[0]}", []
+        return "Summary not found.", []
+
+    def _list_all_documents(self, _: str = ""):
+        """List all indexed documents in the database"""
+        results = db.execute_query(
+            """
+            SELECT d.filename, ds.word_count
+            FROM document_summaries ds
+            JOIN documents d ON ds.document_id = d.id
+            ORDER BY d.filename
+            """
+        )
+        if not results:
+            return "No documents indexed.", []
+
+        formatted = "📚 Indexed Documents:\n\n"
+        # We don't necessarily treat listing as "finding" for the UI panel, 
+        # but we could. For now let's just return text.
+        for filename, word_count in results:
+            formatted += f"📄 {filename} ({word_count} summary words)\n"
+        return formatted, []
+
+    def process(self, messages: List[dict]):
+        """Process messages with native tool-calling logic"""
+        
+        # Define Pydantic/OpenAI-style tool schemas
+        tools_schema = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "search_documents",
+                    "description": "Search for documents based on a query string",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "The search query"
+                            }
+                        },
+                        "required": ["query"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "list_all_documents",
+                    "description": "List all available documents in the system",
+                    "parameters": {"type": "object", "properties": {}, "required": []}
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_full_summary",
+                    "description": "Get the complete text/summary of a specific document",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "filename": {"type": "string", "description": "The exact filename of the document"}
+                        },
+                        "required": ["filename"]
+                    }
+                }
+            }
+        ]
+        
+        # Build context
+        context_messages = []
+        found_documents = []
+        
+        # System prompt - Removed strict formatting instructions
+        system_prompt = """You are an intelligent RFQ Assistant. You help users find and understand documents.
+
+IMPORTANT:
+1. **For greetings** (hi, etc.): Just answer warmly.
+2. **For technical queries**: CALL THE `search_documents` TOOL IMMEDIATELY.
+   - Do NOT ask clarifying questions if you can search first.
+   - Search for the key technical terms.
+3. Use the tools provided to find information."""
+
+        context_messages.append(SystemMessage(content=system_prompt))
+        
+        # Add history
+        for m in messages[:-1]:
+            role = m.get("role")
+            content = m.get("content") or ""
+            if role == "user":
+                context_messages.append(HumanMessage(content=content))
+            elif role == "assistant" or role == "agent":
+                context_messages.append(AIMessage(content=content))
+        
+        # Add current query
+        user_query = messages[-1].get("content") or ""
+        context_messages.append(HumanMessage(content=user_query))
+        
+        # Bind tools to LLM
+        # This tells the API "I support these tools" so valid tool format acts as a tool call, not an error
+        llm_with_tools = llm.bind_tools(tools_schema)
+
+        # Process with loop (max 3 tool calls)
+        for iteration in range(3):
+            try:
+                # Invoke with tools bound
+                response = llm_with_tools.invoke(context_messages)
+                
+                # Check for tool calls
+                if response.tool_calls:
+                    print(f"🛠️ Tool Call Detected (Iter {iteration}): {response.tool_calls}")
+                    
+                    # Append assistant's tool call message
+                    context_messages.append(response)
+                    
+                    # Execute each tool call
+                    for tool_call in response.tool_calls:
+                        tool_name = tool_call["name"]
+                        args = tool_call["args"]
+                        tool_call_id = tool_call["id"]
+                        
+                        tool_result_text = "Error: Tool not found"
+                        tool_docs = []
+                        
+                        if tool_name in self.tools:
+                            # Map args correctly
+                            if tool_name == "search_documents":
+                                tool_result_text, tool_docs = self._search_documents(args.get("query", ""))
+                            elif tool_name == "get_full_summary":
+                                tool_result_text, tool_docs = self._get_full_summary(args.get("filename", ""))
+                            elif tool_name == "list_all_documents":
+                                tool_result_text, tool_docs = self._list_all_documents()
+                        
+                        # Collect docs
+                        found_documents.extend(tool_docs)
+                        
+                        # Append tool output message (Standard LangChain format)
+                        # Note: We append a generic ToolMessage or HumanMessage representing the tool output
+                        from langchain_core.messages import ToolMessage
+                        context_messages.append(ToolMessage(
+                            content=tool_result_text,
+                            tool_call_id=tool_call_id
+                        ))
+                    
+                    # Continue loop to let LLM generate response based on tool output
+                    continue
+                
+                # No tool call -> Final Response
+                response_text = response.content
+                print(f"✅ Final Response. Found docs: {len(found_documents)}")
+                return response_text, found_documents
+                
+            except Exception as e:
+                print(f"❌ Agent Error: {e}")
+                # Fallback: if tool binding fails, just try raw LLM one last time
+                if iteration == 0:
+                     try:
+                        return llm.invoke(context_messages).content, []
+                     except:
+                        pass
+                return "I apologize, but I encountered an error. Please try again.", []
+        
+        return "I found some information but need more specific guidance.", found_documents
+
+
+# Singleton
+agent = ChatAgent()
+
+
+# ----------------------------------------------------------------
+# ADAPTER (For compatibility with main.py)
+# ----------------------------------------------------------------
+def chat_with_llm(messages: List[dict]) -> str:
+    """
+    Adapter function that routes calls to the new Agent.
+    """
+    # Check for direct bypass (Validator/Impact Analysis)
+    if len(messages) > 0:
+        system_msg = next((m for m in messages if m.get("role") == "system"), None)
+        
+        if system_msg:
+            sys_content = system_msg.get("content", "")
+            # Heuristic: If it's the validator or drafter, bypass Agent
+            if "IDENTITY:" in sys_content or "Impact Analysis" in sys_content:
+                # Direct invoke
+                lang_msgs = []
+                for m in messages:
+                    role = m.get("role")
+                    content = m.get("content", "")
+                    if role == "system":
+                        lang_msgs.append(SystemMessage(content=content))
+                    elif role == "user":
+                        lang_msgs.append(HumanMessage(content=content))
+                    elif role == "assistant":
+                        lang_msgs.append(AIMessage(content=content))
+                
+                return llm.invoke(lang_msgs).content
+
+    return agent.process(messages)

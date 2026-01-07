@@ -28,10 +28,20 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { categories, statusOptions } from '@/data/mockData';
 import { cn } from '@/lib/utils';
 import { formatDistanceToNow } from 'date-fns';
-import { getRfqs } from '../api';
+import { getRfqs, deleteRfq } from '../api';
 
 export default function MyRFQs() {
   const [searchQuery, setSearchQuery] = useState('');
@@ -40,17 +50,40 @@ export default function MyRFQs() {
 
   // ✅ REAL RFQs FROM BACKEND
   const [rfqs, setRfqs] = useState<string[]>([]);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [rfqToDelete, setRfqToDelete] = useState<string | null>(null);
 
-  useEffect(() => {
+  const fetchRfqs = () => {
     getRfqs().then((data) => {
       setRfqs(data.files || []);
-      console.log('RFQs from backend:', data.files);
     });
+  };
+
+  useEffect(() => {
+    fetchRfqs();
   }, []);
 
   const filteredRFQs = rfqs.filter((file) =>
     file.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  const handleDelete = (filename: string) => {
+    setRfqToDelete(filename);
+    setDeleteDialogOpen(true);
+  };
+
+  const confirmDelete = async () => {
+    if (!rfqToDelete) return;
+    try {
+      await deleteRfq(rfqToDelete);
+      fetchRfqs(); // Refresh list
+    } catch (error) {
+      alert("Delete failed");
+    } finally {
+      setDeleteDialogOpen(false);
+      setRfqToDelete(null);
+    }
+  };
 
   return (
     <MainLayout>
@@ -175,7 +208,10 @@ export default function MyRFQs() {
                         Export
                       </DropdownMenuItem>
                       <DropdownMenuSeparator />
-                      <DropdownMenuItem className="text-destructive">
+                      <DropdownMenuItem
+                        className="text-destructive"
+                        onClick={() => handleDelete(file)}
+                      >
                         <Trash2 className="w-4 h-4 mr-2" />
                         Delete
                       </DropdownMenuItem>
@@ -218,6 +254,24 @@ export default function MyRFQs() {
           </div>
         )}
       </div>
+
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone. This will permanently delete
+              <span className="font-semibold text-foreground"> {rfqToDelete} </span>.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setRfqToDelete(null)}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDelete} className="bg-destructive hover:bg-destructive/90">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </MainLayout>
   );
 }

@@ -14,6 +14,7 @@ interface ChatInterfaceProps {
   onSendMessage: (message: string) => void;
   agentState: AgentState;
   isGenerating: boolean;
+  onSourceClick?: (source: string) => void;
 }
 
 const phaseLabels: Record<AgentState['phase'], string> = {
@@ -30,6 +31,7 @@ export function ChatInterface({
   onSendMessage,
   agentState,
   isGenerating,
+  onSourceClick,
 }: ChatInterfaceProps) {
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -175,10 +177,11 @@ export function ChatInterface({
                   {message.sources.map((source) => (
                     <div
                       key={source.name}
-                      className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-background border border-border text-xs shadow-sm hover:border-primary/50 transition-colors cursor-default"
+                      onClick={() => onSourceClick?.(source.name)}
+                      className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-background border border-border text-xs shadow-sm hover:border-primary hover:text-primary transition-all cursor-pointer hover:bg-primary/5"
                     >
                       <FileText className="w-3 h-3 text-primary" />
-                      <span className="text-muted-foreground font-medium truncate max-w-[120px]">
+                      <span className="font-medium truncate max-w-[120px]">
                         {source.name}
                       </span>
                     </div>

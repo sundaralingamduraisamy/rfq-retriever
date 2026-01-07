@@ -16,14 +16,14 @@ class Settings(BaseSettings):
     PORT: int = 8000
     
     # Paths (Relative to project root)
-    DATA_DIR: str = "data"
-    EXPORT_DIR: str = "exports"
-    CHUNK_INDEX_FILE: str = "chunk_index.json"
+    # Legacy paths removed (DATA_DIR, CHUNK_INDEX_FILE, EXPORT_DIR)
+
+
     
     # LLM Configuration
-    LLM_PROVIDER: str = "groq"
+    LLM_PROVIDER: str
     LLM_API_KEY: str
-    LLM_MODEL_NAME: str = "llama3-70b-8192"
+    LLM_MODEL_NAME: str
     LLM_TEMPERATURE: float = 0.4
 
     # Conflict/Secondary LLM (Optional)
@@ -37,6 +37,13 @@ class Settings(BaseSettings):
     
     # Retriever Configuration
     RETRIEVER_TOP_K: int = 5
+
+    # Postgres Configuration
+    POSTGRES_HOST: str = "localhost"
+    POSTGRES_PORT: str = "5434"
+    POSTGRES_USER: str = "postgres"
+    POSTGRES_PASSWORD: str = "rahul5757"
+    POSTGRES_DB: str = "documents_db"
 
     # API Configuration
     CORS_ORIGINS: List[str] = ["*"]

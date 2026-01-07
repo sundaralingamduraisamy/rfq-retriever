@@ -29,3 +29,36 @@ export async function getConfig() {
   const res = await fetch(`${BASE}/api/config`);
   return res.json();
 }
+
+export async function uploadDocument(file) {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const res = await fetch(`${BASE}/upload`, {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const error = await res.json();
+    throw new Error(error.detail || "Upload failed");
+  }
+
+  return res.json();
+}
+
+export async function deleteDocument(filename) {
+  const res = await fetch(`${BASE}/documents/${filename}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error("Delete failed");
+  return res.json();
+}
+
+export async function deleteRfq(filename) {
+  const res = await fetch(`${BASE}/rfqs/${filename}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error("Delete API failed");
+  return res.json();
+}

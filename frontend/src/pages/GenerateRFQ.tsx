@@ -1,4 +1,5 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
+import { Trash2, Edit2, Check, X, File, FileText, Download } from 'lucide-react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ChatInterface } from '@/components/generator/ChatInterface';
 import { RFQPreview } from '@/components/generator/RFQPreview';
@@ -18,6 +19,7 @@ const BACKEND = import.meta.env.VITE_BACKEND_URL || "http://127.0.0.1:8000";
 type RetrievedRFQ = {
   file: string;
   score: number;
+  preview?: string;
 };
 
 export default function GenerateRFQ() {
@@ -31,6 +33,24 @@ export default function GenerateRFQ() {
     },
   ]);
 
+  // Load chat history from localStorage on mount
+  useEffect(() => {
+    const savedMessages = localStorage.getItem('rfq_chat_messages');
+    if (savedMessages) {
+      try {
+        const parsed = JSON.parse(savedMessages);
+        setMessages(parsed);
+      } catch (e) {
+        console.error('Failed to load chat history:', e);
+      }
+    }
+  }, []);
+
+  // Save messages to localStorage whenever they change
+  useEffect(() => {
+    localStorage.setItem('rfq_chat_messages', JSON.stringify(messages));
+  }, [messages]);
+
   const [agentState, setAgentState] = useState<AgentState>({
     phase: 'idle',
     progress: 0,
@@ -38,10 +58,8 @@ export default function GenerateRFQ() {
 
   const [isGenerating, setIsGenerating] = useState(false);
 
-  const [validated, setValidated] = useState(false);
   const [retrievedRFQs, setRetrievedRFQs] = useState<RetrievedRFQ[]>([]);
   const [selectedRFQ, setSelectedRFQ] = useState<string | null>(null);
-
   const [referenceText, setReferenceText] = useState<string | null>(null);
   const [draftText, setDraftText] = useState<string | null>(null);
 
@@ -60,176 +78,70 @@ export default function GenerateRFQ() {
       setMessages((prev) => [...prev, userMessage]);
       setIsGenerating(true);
 
-      // -------------------------------------------------------------
-      // 1. IF DRAFT EXISTS -> TREAT AS AI EDIT INSTRUCTION
-      // -------------------------------------------------------------
-      if (draftText && validated) {
-        try {
-          // Temporarily show that we are analyzing/updating
-          setAgentState({ phase: 'analyze', progress: 50 });
-
-          const editRes = await fetch(`${BACKEND}/edit_rfq`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              current_text: draftText,
-              instruction: content,
-            }),
-          });
-          const editData = await editRes.json();
-
-          setDraftText(editData.updated_text);
-
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: `msg-edit-${Date.now()}`,
-              role: 'assistant',
-              content: `**Impact Analysis:**\n\n${editData.analysis}`,
-              timestamp: new Date().toISOString(),
-            },
-          ]);
-        } catch (e) {
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: `msg-err-${Date.now()}`,
-              role: 'assistant',
-              content: 'Failed to update RFQ. Please try again.',
-              timestamp: new Date().toISOString(),
-            },
-          ]);
-        } finally {
-          setIsGenerating(false);
-          setAgentState({ phase: 'idle', progress: 0 });
-        }
-        return;
-      }
-
-      // -------------------------------------------------------------
-      // 2. STANDARD FLOW (VALIDATION & SEARCH)
-      // -------------------------------------------------------------
       try {
-        const validateRes = await fetch(`${BACKEND}/validate_requirement`, {
+        // Send to /chat endpoint in the format backend expects
+        // Backend wants: { user_message: string, history: Array<{role, text}> }
+        const history = messages.map(m => ({
+          role: m.role === 'assistant' ? 'agent' : 'user',
+          text: m.content
+        }));
+
+        const response = await fetch(`${BACKEND}/chat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ requirement: content }),
+          body: JSON.stringify({
+            user_message: content,
+            history: history
+          }),
         });
 
-        const validateData = await validateRes.json();
+        const data = await response.json();
 
-        if (!validateData.valid) {
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: `msg-invalid-${Date.now()}`,
-              role: 'assistant',
-              content: validateData.message,
-              timestamp: new Date().toISOString(),
-            },
-          ]);
-          setIsGenerating(false);
-          return;
+        // Check for related documents
+        if (data.related_documents && data.related_documents.length > 0) {
+          setRetrievedRFQs(data.related_documents);
+          // If docs found, clear previous selection/draft to show the list
+          setSelectedRFQ(null);
+          setReferenceText(null);
+          setDraftText(null);
         }
 
-        setValidated(true);
-
+        // Add LLM response to messages
         setMessages((prev) => [
           ...prev,
           {
-            id: `msg-valid-${Date.now()}`,
+            id: `msg-assistant-${Date.now()}`,
             role: 'assistant',
-            content:
-              'Your requirement is valid. Retrieving the most relevant RFQs.',
+            content: data.reply,
             timestamp: new Date().toISOString(),
           },
         ]);
-
-        const searchRes = await fetch(`${BACKEND}/search_rfq`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query: content }),
-        });
-
-        const searchData = await searchRes.json();
-        const results = searchData.results || [];
-        setRetrievedRFQs(results);
-
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `msg-found-${Date.now()}`,
-            role: 'assistant',
-            content: `I found ${results.length} relevant RFQ(s) in the database. Please select one from the list on the right to use as a reference.`,
-            timestamp: new Date().toISOString(),
-          },
-        ]);
-
-        setReferenceText(null);
-        setDraftText(null);
-      } catch {
+      } catch (error) {
         setMessages((prev) => [
           ...prev,
           {
             id: `msg-error-${Date.now()}`,
             role: 'assistant',
-            content:
-              'Error occurred while processing the requirement. Please try again.',
+            content: 'Error communicating with the assistant. Please try again.',
             timestamp: new Date().toISOString(),
           },
         ]);
       } finally {
         setIsGenerating(false);
-        setAgentState({ phase: 'idle', progress: 0 });
       }
     },
-    [draftText, validated]
+    [messages]
+    [messages]
   );
 
-  const handleDraftRFQ = async () => {
-    if (!selectedRFQ) return;
-
-    setIsGenerating(true);
-    setAgentState({ phase: 'draft', progress: 50 });
-
+  const handleDocumentSelect = async (filename: string) => {
+    setSelectedRFQ(filename);
     try {
-      const res = await fetch(`${BACKEND}/generate_final_rfq`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          requirement: messages[messages.length - 1].content,
-          filled_data: {},
-          reference_file: selectedRFQ,
-        }),
-      });
-
+      const res = await fetch(`${BACKEND}/rfq_text/${encodeURIComponent(filename)}`);
       const data = await res.json();
-      setDraftText(data.draft);
-
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `msg-drafted-${Date.now()}`,
-          role: 'assistant',
-          content:
-            'The RFQ has been drafted. You can now:\n1. Click **Edit** to manually modify text.\n2. **Chat** below to instruct me to make changes (e.g., "Add payment terms").\n\nI will analyze all changes automatically.',
-          timestamp: new Date().toISOString(),
-        },
-      ]);
-    } catch {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `msg-draft-error-${Date.now()}`,
-          role: 'assistant',
-          content:
-            'Failed to generate RFQ draft. Please try again.',
-          timestamp: new Date().toISOString(),
-        },
-      ]);
-    } finally {
-      setIsGenerating(false);
-      setAgentState({ phase: 'idle', progress: 0 });
+      setReferenceText(data.text);
+    } catch (e) {
+      console.error("Failed to fetch document text", e);
     }
   };
 
@@ -317,6 +229,7 @@ export default function GenerateRFQ() {
                   onSendMessage={handleSendMessage}
                   agentState={agentState}
                   isGenerating={isGenerating}
+                  onSourceClick={handleDocumentSelect}
                 />
               </div>
             </div>
@@ -326,54 +239,114 @@ export default function GenerateRFQ() {
 
           <ResizablePanel defaultSize={50} minSize={35}>
             <div className="h-full bg-card/30 p-6 overflow-y-auto">
-              {validated && retrievedRFQs.length > 0 && !draftText && (
+              {/* Case 1: Show list of found documents */}
+              {retrievedRFQs.length > 0 && !selectedRFQ && !draftText && (
                 <>
                   <h2 className="text-lg font-semibold mb-4">
-                    Select Reference RFQ
+                    Found Documents
                   </h2>
-
                   <div className="space-y-3">
-                    {retrievedRFQs.map((rfq) => (
-                      <div
-                        key={rfq.file}
-                        className={`border rounded-lg p-4 cursor-pointer ${selectedRFQ === rfq.file
-                          ? 'border-primary bg-primary/5'
-                          : 'bg-card'
-                          }`}
-                        onClick={async () => {
-                          setSelectedRFQ(rfq.file);
-                          setDraftText(null);
+                    {retrievedRFQs.map((rfq) => {
+                      const isPdf = rfq.file.toLowerCase().endsWith('.pdf');
+                      const iconColor = isPdf ? 'text-red-500' : 'text-blue-500';
+                      const bgColor = isPdf ? 'bg-red-50' : 'bg-blue-50';
 
-                          const res = await fetch(
-                            `${BACKEND}/rfq_text/${encodeURIComponent(rfq.file)}`
-                          );
-                          const data = await res.json();
-                          setReferenceText(data.text);
-                        }}
-                      >
-                        <p className="font-mono text-sm">{rfq.file}</p>
-                        <p className="text-xs text-muted-foreground">
-                          Relevance: {rfq.score.toFixed(2)}
-                        </p>
-                      </div>
-                    ))}
+                      return (
+                        <div
+                          key={rfq.file}
+                          className="flex items-center p-3 hover:bg-muted/50 transition-colors cursor-pointer border-b border-border last:border-0"
+                          onClick={() => handleDocumentSelect(rfq.file)}
+                        >
+                          {/* Icon Box */}
+                          <div className={`flex-shrink-0 w-10 h-10 rounded-lg ${bgColor} flex items-center justify-center mr-3`}>
+                            <FileText className={`w-5 h-5 ${iconColor}`} />
+                          </div>
+
+                          {/* Content */}
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-foreground truncate" title={rfq.file}>
+                              {rfq.file}
+                            </p>
+                          </div>
+
+                          {/* Match Score (Subtle) */}
+                          <span className="text-xs text-muted-foreground ml-2">
+                            {rfq.score}%
+                          </span>
+                        </div>
+                      );
+                    })}
                   </div>
-
-                  <Button
-                    className="mt-6"
-                    disabled={!selectedRFQ}
-                    onClick={handleDraftRFQ}
-                  >
-                    Draft RFQ
-                  </Button>
                 </>
               )}
 
+              {/* Case 2: Show selected reference document */}
               {selectedRFQ && referenceText && !draftText && (
-                <RFQPreview isVisible={true} content={referenceText} />
+                <div className="flex flex-col h-full">
+                  <div className="flex items-center justify-between mb-4">
+                    <Button variant="ghost" size="sm" onClick={() => setSelectedRFQ(null)}>
+                      ← Back to List
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        // Draft RFQ based on this reference
+                        // Trigger a new chat message to draft
+                        handleSendMessage(`Please draft a new RFQ using ${selectedRFQ} as a reference.`);
+                      }}
+                    >
+                      Draft from this
+                    </Button>
+                  </div>
+                  <div className="flex-1 overflow-auto border rounded-md p-0 bg-background h-full">
+                    {selectedRFQ.toLowerCase().endsWith('.pdf') ? (
+                      <iframe
+                        src={`${BACKEND}/documents/${selectedRFQ}/view`}
+                        className="w-full h-full border-0"
+                        title="Document Preview"
+                      />
+                    ) : (
+                      <div className="flex flex-col h-full bg-background relative">
+                        {/* Header for Editor */}
+                        <div className="flex items-center justify-between px-4 py-2 border-b bg-muted/20">
+                          <span className="text-xs font-mono text-muted-foreground">{selectedRFQ}</span>
+                          <div className="flex gap-2">
+                            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => window.open(`${BACKEND}/documents/${selectedRFQ}/view`, '_blank')}>
+                              <Download className="w-3 h-3 mr-1" /> Original
+                            </Button>
+                            <Button size="sm" className="h-7 text-xs" onClick={() => {
+                              setDraftText(referenceText);
+                              setSelectedRFQ(null);
+                            }}>
+                              <FileText className="w-3 h-3 mr-1" /> Switch to Full Draft Mode
+                            </Button>
+                          </div>
+                        </div>
+
+                        {/* Editable Text Area (Acts as "Manual Editing") */}
+                        <textarea
+                          className="flex-1 w-full p-4 resize-none bg-background focus:outline-none font-mono text-sm leading-relaxed"
+                          value={referenceText}
+                          onChange={(e) => {
+                            // "Manual Editing" Logic:
+                            // If they type here, we treat it as starting a draft/edit session
+                            // We update the local state. Ideally we should switch to 'draftText' mode immediately
+                            // to unlock all draft features, but user wants editing "in the right side".
+                            // Let's simpler: Update referenceText? No, referenceText is fetched.
+                            // We should auto-promote to Draft Mode on edit.
+                            setDraftText(e.target.value);
+                            setSelectedRFQ(null); // This switches the VIEW to Case 3 (Draft Preview) which has the full editor
+                          }}
+                          placeholder="Loading document text..."
+                        />
+                      </div>
+                    )}
+                  </div>
+                </div>
               )}
 
-              {draftText && (
+              {/* Case 3: Show generated draft */}
+              {draftText ? (
                 <RFQPreview
                   isVisible={true}
                   content={draftText}
@@ -383,9 +356,19 @@ export default function GenerateRFQ() {
                   onSave={handleSaveEdit}
                   onCancel={() => setIsEditingMode(false)}
                 />
+              ) : (
+                // Case 4: Empty state (only if no list and no draft)
+                !retrievedRFQs.length && (
+                  <div className="flex items-center justify-center h-full text-center">
+                    <div>
+                      <p className="text-muted-foreground mb-2">No documents selected</p>
+                      <p className="text-sm text-muted-foreground">
+                        Ask the assistant to search or draft an RFQ
+                      </p>
+                    </div>
+                  </div>
+                )
               )}
-
-              {!validated && <RFQPreview isVisible={false} />}
             </div>
           </ResizablePanel>
         </ResizablePanelGroup>
