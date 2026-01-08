@@ -15,6 +15,32 @@ export async function getRfqs() {
   return res.json();
 }
 
+export async function saveRfq(payload) {
+  const res = await fetch(`${BASE}/rfqs/save`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error("Save failed");
+  return res.json();
+}
+
+export async function updateRfqStatus(id, status) {
+  const res = await fetch(`${BASE}/rfqs/${id}/status`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status }),
+  });
+  if (!res.ok) throw new Error("Status update failed");
+  return res.json();
+}
+
+export async function getRfqDetail(id) {
+  const res = await fetch(`${BASE}/rfqs/${id}`);
+  if (!res.ok) throw new Error("Failed to load RFQ");
+  return res.json();
+}
+
 export async function login(username, password) {
   const res = await fetch(`${BASE}/api/login`, {
     method: "POST",
@@ -55,8 +81,8 @@ export async function deleteDocument(filename) {
   return res.json();
 }
 
-export async function deleteRfq(filename) {
-  const res = await fetch(`${BASE}/rfqs/${filename}`, {
+export async function deleteRfq(id) {
+  const res = await fetch(`${BASE}/rfqs/${id}`, {
     method: "DELETE",
   });
   if (!res.ok) throw new Error("Delete API failed");

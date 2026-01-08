@@ -1,5 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
-import { Trash2, Edit2, Check, X, File, FileText, Download, RefreshCw, Zap, User, Bot } from 'lucide-react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { saveRfq, getRfqDetail } from '@/api';
+import { Trash2, Edit2, Check, X, File, FileText, Download, RefreshCw, Zap, User, Bot, Save } from 'lucide-react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ChatInterface } from '@/components/generator/ChatInterface';
 import { RFQPreview } from '@/components/generator/RFQPreview';
@@ -26,6 +28,9 @@ type RetrievedRFQ = {
 };
 
 export default function GenerateRFQ() {
+  const location = useLocation();
+  const navigate = useNavigate();
+
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: 'msg-init',
@@ -66,8 +71,64 @@ export default function GenerateRFQ() {
   const [referenceText, setReferenceText] = useState<string | null>(null);
 
   // DRAFTING STATE
-  const [draftText, setDraftText] = useState<string>("# New RFQ Spec\n\nStart typing or ask the Agent to generate content...");
+  const [draftText, setDraftText] = useState<string>(() => {
+    // If explicit navigation, wait for fetch (or start empty)
+    if (location.state?.rfqId) return "";
+    // Otherwise restore from storage
+    return localStorage.getItem('rfq_draft_text') || "# New RFQ Spec\n\nStart typing or ask the Agent to generate content...";
+  });
+
   const [draftMode, setDraftMode] = useState<'agent' | 'manual'>('agent');
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
+
+  const [rfqId, setRfqId] = useState<number | null>(() => {
+    if (location.state?.rfqId) return location.state.rfqId;
+    const saved = localStorage.getItem('rfq_active_id');
+    return saved ? Number(saved) : null;
+  });
+
+  // PERSISTENCE EFFECTS
+  useEffect(() => {
+    localStorage.setItem('rfq_draft_text', draftText);
+  }, [draftText]);
+
+  useEffect(() => {
+    if (rfqId) {
+      localStorage.setItem('rfq_active_id', rfqId.toString());
+    } else {
+      localStorage.removeItem('rfq_active_id');
+    }
+  }, [rfqId]);
+
+  // Load RFQ if editing (Explicit Navigation)
+  useEffect(() => {
+    if (location.state?.rfqId) {
+      setRfqId(location.state.rfqId);
+      getRfqDetail(location.state.rfqId).then(data => {
+        setDraftText(data.content || "");
+        setAgentState({ phase: 'draft', progress: 100 });
+      }).catch(err => console.error(err));
+    }
+  }, [location.state]);
+
+  const handleSave = async () => {
+    try {
+      setSaveStatus("saving");
+      const title = draftText.split('\n')[0].replace('#', '').trim() || "Untitled RFQ";
+      const res = await saveRfq({
+        id: rfqId,
+        title: title.substring(0, 50),
+        content: draftText,
+        status: "draft"
+      });
+      setRfqId(res.id);
+      setSaveStatus("saved");
+      setTimeout(() => setSaveStatus("idle"), 2000);
+    } catch (e) {
+      alert("Failed to save draft");
+      setSaveStatus("idle");
+    }
+  };
 
   const handleResetSession = () => {
     if (confirm("Are you sure? This will clear the current draft and chat history.")) {
@@ -81,7 +142,10 @@ export default function GenerateRFQ() {
       setRetrievedRFQs([]);
       setSelectedRFQ(null);
       setReferenceText(null);
+      setRfqId(null); // Reset RFQ ID
       localStorage.removeItem('rfq_chat_messages');
+      localStorage.removeItem('rfq_draft_text');
+      localStorage.removeItem('rfq_active_id');
     }
   };
 
@@ -267,6 +331,18 @@ export default function GenerateRFQ() {
           {/* --- RIGHT PANEL: EDITOR / PREVIEW --- */}
           <ResizablePanel defaultSize={60} minSize={30}>
             <div className="h-full bg-card flex flex-col">
+              <div className="flex items-center justify-between border-b border-border p-3 bg-muted/20">
+                <span className="font-semibold text-sm flex items-center gap-2">
+                  {rfqId ? <Badge variant="outline" className="text-xs">ID: {rfqId}</Badge> : null}
+                  Draft Editor
+                </span>
+                <div className="flex items-center gap-2">
+                  <Button variant="outline" size="sm" onClick={handleSave} disabled={saveStatus === "saving"}>
+                    <Save className="w-4 h-4 mr-2" />
+                    {saveStatus === "saving" ? "Saving..." : saveStatus === "saved" ? "Saved" : "Save"}
+                  </Button>
+                </div>
+              </div>
 
               {selectedRFQ && (
                 <div className="flex-shrink-0 bg-muted/30 border-b border-border p-2 flex items-center justify-between">

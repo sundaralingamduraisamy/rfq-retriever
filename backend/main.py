@@ -83,9 +83,126 @@ class LoginRequest(BaseModel):
     username: str
     password: str
 
+class SaveRFQModel(BaseModel):
+    id: int | None = None
+    title: str = "Untitled RFQ"
+    content: str
+    status: str = "draft"
+
+class UpdateStatusModel(BaseModel):
+    status: str
+
+
 # ----------------------------------------------------------------
 # API Routes
 # ----------------------------------------------------------------
+
+@app.patch("/rfqs/{rfq_id}/status")
+def update_rfq_status(rfq_id: int, data: UpdateStatusModel):
+    """Update only the status of an RFQ"""
+    if not db:
+        raise HTTPException(500, "Database connection failed")
+        
+    success = db.execute_update(
+        "UPDATE generated_rfqs SET status = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s",
+        (data.status, rfq_id)
+    )
+    
+    if not success:
+        raise HTTPException(404, "RFQ not found")
+        
+    return {"status": "updated", "id": rfq_id, "new_status": data.status}
+
+@app.post("/rfqs/save")
+def save_rfq(data: SaveRFQModel):
+    """Save or Update RFQ in DB"""
+    if not db:
+        raise HTTPException(500, "Database connection failed")
+
+    try:
+        if data.id:
+            # Update existing
+            success = db.execute_update(
+                """
+                UPDATE generated_rfqs 
+                SET filename = %s, content = %s, status = %s, updated_at = CURRENT_TIMESTAMP 
+                WHERE id = %s
+                """,
+                (data.title, data.content, data.status, data.id)
+            )
+            if not success:
+                 raise HTTPException(404, "RFQ ID not found for update")
+            return {"status": "updated", "id": data.id, "title": data.title}
+        else:
+            # Insert new
+            row = db.execute_insert_returning(
+                """
+                INSERT INTO generated_rfqs (filename, content, status) 
+                VALUES (%s, %s, %s) 
+                RETURNING id
+                """,
+                (data.title, data.content, data.status)
+            )
+            if not row:
+                raise HTTPException(500, "Failed to insert RFQ")
+            return {"status": "created", "id": row[0], "title": data.title}
+
+    except Exception as e:
+        print(f"Save error: {e}")
+        raise HTTPException(500, f"Save failed: {str(e)}")
+
+
+@app.get("/rfqs")
+def get_rfqs():
+    """List all generated RFQs from DB"""
+    if not db:
+        raise HTTPException(500, "Database connection failed")
+    
+    rows = db.execute_query("SELECT id, filename, status, updated_at, created_at FROM generated_rfqs ORDER BY updated_at DESC")
+    
+    # Format for frontend
+    results = []
+    for r in rows:
+        results.append({
+            "id": r[0],
+            "title": r[1],
+            "status": r[2],
+            "updated_at": r[3].isoformat() + "Z" if r[3] else None,
+            "created_at": r[4].isoformat() + "Z" if r[4] else None
+        })
+        
+    return {"rfqs": results}
+
+
+@app.get("/rfqs/{rfq_id}")
+def get_rfq_detail(rfq_id: int):
+    """Get content of specific RFQ for editing"""
+    if not db:
+        raise HTTPException(500, "Database connection failed")
+        
+    row = db.execute_query_single("SELECT id, filename, content, status FROM generated_rfqs WHERE id = %s", (rfq_id,))
+    
+    if not row:
+        raise HTTPException(404, "RFQ not found")
+        
+    return {
+        "id": row[0], 
+        "title": row[1], 
+        "content": row[2], 
+        "status": row[3]
+    }
+    
+@app.delete("/rfqs/{rfq_id}")
+def delete_rfq_db(rfq_id: int):
+    """Delete RFQ from DB"""
+    if not db:
+        raise HTTPException(500, "Database connection failed")
+        
+    success = db.execute_update("DELETE FROM generated_rfqs WHERE id = %s", (rfq_id,))
+    if success:
+        return {"status": "deleted", "id": rfq_id}
+    else:
+        raise HTTPException(500, "Failed to delete RFQ")
 
 @app.get("/api/config")
 def get_config():
@@ -107,6 +224,32 @@ def login(creds: LoginRequest):
             "instanceId": SERVER_INSTANCE_ID
         }
     raise HTTPException(status_code=401, detail="Invalid Credentials")
+
+@app.get("/rfqs/{rfq_id}/pdf")
+def get_rfq_pdf(rfq_id: int):
+    """Generate and Serve PDF for an RFQ"""
+    if not db:
+        raise HTTPException(500, "Database connection failed")
+        
+    row = db.execute_query_single("SELECT filename, content FROM generated_rfqs WHERE id = %s", (rfq_id,))
+    
+    if not row:
+        raise HTTPException(404, "RFQ not found")
+        
+    title, content = row
+    clean_content = clean_rfq_text(content)
+    
+    # Render PDF
+    rfq_data = {"name": title, "domain": "Automobile", "body": clean_content}
+    file_bytes = render_pdf(rfq_data, 1)
+    
+    filename = f"{title.replace(' ', '_')}.pdf"
+    
+    return Response(
+        content=file_bytes, 
+        media_type="application/pdf", 
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
 
 @app.get("/")
 def root():
@@ -376,14 +519,18 @@ def get_rfq_text(filename: str):
     except:
         raise HTTPException(404, "RFQ Text Not Found")
 
-@app.get("/documents/{filename}/view")
-def view_document(filename: str):
-    """Serve raw document content for inline viewing"""
-    row = db.execute_query_single("SELECT file_content FROM documents WHERE filename=%s", (filename,))
+@app.get("/documents/{doc_id}/view")
+def view_document_by_id(doc_id: int):
+    """Serve raw document content for inline viewing by ID"""
+    if not db:
+        raise HTTPException(500, "Database connection failed")
+
+    row = db.execute_query_single("SELECT filename, file_content FROM documents WHERE id=%s", (doc_id,))
     if not row:
         raise HTTPException(404, "Document not found")
     
-    content = bytes(row[0])
+    filename = row[0]
+    content = bytes(row[1])
     ext = filename.split('.')[-1].lower()
     
     media_type = "application/pdf"
@@ -392,7 +539,28 @@ def view_document(filename: str):
     elif ext == "xlsx":
          media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
          
-    return Response(content=content, media_type=media_type)
+    return Response(content=content, media_type=media_type, headers={"Content-Disposition": "inline"})
+
+@app.get("/documents/{doc_id}/download")
+def download_document_by_id(doc_id: int):
+    """Serve document content for download by ID"""
+    if not db:
+        raise HTTPException(500, "Database connection failed")
+
+    row = db.execute_query_single("SELECT filename, file_content FROM documents WHERE id=%s", (doc_id,))
+    if not row:
+        raise HTTPException(404, "Document not found")
+    
+    filename = row[0]
+    content = bytes(row[1])
+    ext = filename.split('.')[-1].lower()
+    
+    media_type = "application/octet-stream" 
+    if ext == "pdf": media_type = "application/pdf"
+    
+    # quoted_filename = urllib.parse.quote(filename) # If needed, but usually starlette handles basic
+    
+    return Response(content=content, media_type=media_type, headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
 @app.post("/analyze_changes")

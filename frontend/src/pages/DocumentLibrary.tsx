@@ -14,6 +14,7 @@ import {
   List,
 } from 'lucide-react';
 import { MainLayout } from '@/components/layout/MainLayout';
+import { DocumentPreviewDialog } from '@/components/common/DocumentPreviewDialog';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import {
@@ -168,13 +169,34 @@ export default function DocumentLibrary() {
     }
   };
 
-  const handleView = (doc: Document) => {
-    window.open(`${API_BASE_URL}/data/${doc.name}`, '_blank');
+  /* PREVIEW STATE */
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewDoc, setPreviewDoc] = useState<Document | null>(null);
+  const [previewText, setPreviewText] = useState<string>("");
+
+  const handleView = async (doc: Document) => {
+    setPreviewDoc(doc);
+    if (doc.type !== 'pdf') {
+      // Fetch text for preview
+      try {
+        const res = await fetch(`${API_BASE_URL}/rfq_text/${encodeURIComponent(doc.name)}`);
+        if (res.ok) {
+          const data = await res.json();
+          setPreviewText(data.text);
+        } else {
+          setPreviewText("Failed to load text content.");
+        }
+      } catch (e) {
+        setPreviewText("Error loading content.");
+      }
+    }
+    setPreviewOpen(true);
   };
 
   const handleDownload = (doc: Document) => {
-    window.open(`${API_BASE_URL}/data/${doc.name}`, '_blank');
+    window.open(`${API_BASE_URL}/documents/${doc.id}/download`, '_blank');
   };
+
 
   const handleDelete = (doc: Document) => {
     setDocToDelete(doc);
@@ -519,6 +541,17 @@ export default function DocumentLibrary() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Preview Dialog */}
+      <DocumentPreviewDialog
+        open={previewOpen}
+        onOpenChange={setPreviewOpen}
+        title={previewDoc?.name || "Document Preview"}
+        type={previewDoc?.type === 'pdf' ? 'pdf' : 'text'}
+        previewUrl={previewDoc ? `${API_BASE_URL}/documents/${previewDoc.id}/view` : undefined}
+        textContent={previewText}
+        onDownload={previewDoc ? () => handleDownload(previewDoc) : undefined}
+      />
     </MainLayout>
   );
 }

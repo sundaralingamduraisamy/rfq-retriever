@@ -104,6 +104,23 @@ class DatabaseManager:
             cursor.close()
             self.return_connection(conn)
 
+    def execute_insert_returning(self, query: str, params: tuple = None):
+        """Execute INSERT and return a single result (e.g. ID)"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(query, params or ())
+            result = cursor.fetchone()
+            conn.commit()
+            return result
+        except psycopg2.Error as e:
+            conn.rollback()
+            print(f"❌ Insert error: {e}")
+            return None
+        finally:
+            cursor.close()
+            self.return_connection(conn)
+
     def create_tables(self):
         """Create necessary database tables"""
         queries = [
@@ -133,6 +150,16 @@ class DatabaseManager:
                 summary_id INTEGER REFERENCES document_summaries(id) ON DELETE CASCADE,
                 embedding vector(384),
                 UNIQUE(summary_id)
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS generated_rfqs (
+                id SERIAL PRIMARY KEY,
+                filename TEXT NOT NULL,
+                content TEXT,
+                status TEXT DEFAULT 'draft',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
             """
         ]
