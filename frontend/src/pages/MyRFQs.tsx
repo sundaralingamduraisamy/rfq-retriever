@@ -182,39 +182,47 @@ export default function MyRFQs() {
           </Select>
         </div>
 
-        <div className="rounded-xl border bg-card overflow-hidden shadow-sm">
+        <div className="rounded-xl border border-slate-200 bg-white shadow-soft-sm overflow-hidden">
           <Table>
-            <TableHeader className="bg-slate-50 border-b">
+            <TableHeader className="bg-slate-50/50 border-b border-slate-100">
               <TableRow className="hover:bg-transparent">
-                <TableHead className="w-[40%] pl-6">RFQ Title</TableHead>
-                <TableHead className="w-[20%]">Status</TableHead>
-                <TableHead className="w-[20%]">Created At</TableHead>
-                <TableHead className="w-[20%] text-right pr-6">Actions</TableHead>
+                <TableHead className="w-[40%] pl-6 py-4 text-xs font-semibold uppercase tracking-wider text-slate-500">RFQ Title</TableHead>
+                <TableHead className="w-[20%] text-xs font-semibold uppercase tracking-wider text-slate-500">Status</TableHead>
+                <TableHead className="w-[20%] text-xs font-semibold uppercase tracking-wider text-slate-500">Created At</TableHead>
+                <TableHead className="w-[20%] text-right pr-6 text-xs font-semibold uppercase tracking-wider text-slate-500">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {filteredRFQs.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={4} className="h-24 text-center text-muted-foreground">
-                    No RFQs found.
+                  <TableCell colSpan={4} className="h-32 text-center text-muted-foreground">
+                    <div className="flex flex-col items-center justify-center gap-2">
+                      <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center">
+                        <Filter className="w-5 h-5 text-slate-400" />
+                      </div>
+                      <p>No RFQs found matching your criteria</p>
+                    </div>
                   </TableCell>
                 </TableRow>
               ) : (
                 filteredRFQs.map((item) => (
-                  <TableRow key={item.id}>
-                    <TableCell className="font-medium">
-                      <div className="flex flex-col">
-                        <span>{item.title}</span>
-                        <span className="text-xs text-muted-foreground">ID: {item.id}</span>
+                  <TableRow key={item.id} className="group hover:bg-slate-50/80 transition-colors border-b border-slate-50 last:border-0">
+                    <TableCell className="font-medium pl-6 py-4">
+                      <div className="flex flex-col gap-1">
+                        <span className="text-slate-700 font-semibold group-hover:text-primary transition-colors">{item.title}</span>
+                        <span className="text-[11px] text-slate-400 font-mono">ID: #{item.id}</span>
                       </div>
                     </TableCell>
                     <TableCell>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" className="h-8 p-0 hover:bg-transparent">
+                          <Button variant="ghost" className="h-auto p-0 hover:bg-transparent">
                             <Badge
                               variant="outline"
-                              className={cn("cursor-pointer px-3 py-1 rounded-full font-normal border shadow-sm transition-colors", statusStyles[item.status] || statusStyles.draft)}
+                              className={cn(
+                                "cursor-pointer px-2.5 py-0.5 rounded-full text-xs font-medium border shadow-none transition-all",
+                                statusStyles[item.status] || statusStyles.draft
+                              )}
                             >
                               {item.status === 'review' ? 'In Review' : item.status.charAt(0).toUpperCase() + item.status.slice(1)}
                             </Badge>
@@ -233,32 +241,37 @@ export default function MyRFQs() {
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </TableCell>
-                    <TableCell className="text-muted-foreground text-sm">
-                      {item.created_at ? format(new Date(item.created_at), "MMM d, yyyy h:mm a") : '-'}
+                    <TableCell className="text-slate-500 text-sm">
+                      {item.created_at ? format(new Date(item.created_at), "MMM d, yyyy") : '-'}
+                      <span className="text-xs text-slate-400 block mt-0.5">
+                        {item.created_at ? format(new Date(item.created_at), "h:mm a") : ''}
+                      </span>
                     </TableCell>
-                    <TableCell className="text-right">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon">
-                            <MoreVertical className="w-4 h-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => handleView(item.id)}>
-                            <Eye className="w-4 h-4 mr-2" /> View
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleEdit(item.id)}>
-                            <Edit2 className="w-4 h-4 mr-2" /> Edit
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => window.open(`${import.meta.env.VITE_BACKEND_URL}/rfqs/${item.id}/pdf`, '_blank')}>
-                            <Download className="w-4 h-4 mr-2" /> Export PDF
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem className="text-destructive" onClick={() => handleDelete(item.id)}>
-                            <Trash2 className="w-4 h-4 mr-2" /> Delete
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                    <TableCell className="text-right pr-4">
+                      <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                        <Button variant="ghost" size="icon" onClick={() => handleView(item.id)} className="h-8 w-8 text-slate-400 hover:text-primary">
+                          <Eye className="w-4 h-4" />
+                        </Button>
+                        <Button variant="ghost" size="icon" onClick={() => handleEdit(item.id)} className="h-8 w-8 text-slate-400 hover:text-primary">
+                          <Edit2 className="w-4 h-4" />
+                        </Button>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-primary">
+                              <MoreVertical className="w-4 h-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => window.open(`${import.meta.env.VITE_BACKEND_URL}/rfqs/${item.id}/pdf`, '_blank')}>
+                              <Download className="w-4 h-4 mr-2" /> Export PDF
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => handleDelete(item.id)}>
+                              <Trash2 className="w-4 h-4 mr-2" /> Delete
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))

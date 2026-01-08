@@ -4,7 +4,7 @@ export function Header() {
     const user = JSON.parse(localStorage.getItem("user") || '{"name": "Guest", "role": "Visitor"}');
 
     return (
-        <header className="fixed top-0 left-0 right-0 z-50 h-16 bg-background border-b border-border px-4 flex items-center justify-between">
+        <header className="fixed top-0 left-0 right-0 z-50 h-16 glass px-6 flex items-center justify-between transition-all duration-300">
             {/* Logo */}
             <div className="flex items-center">
                 <img

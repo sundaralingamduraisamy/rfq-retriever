@@ -18,6 +18,16 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 const BACKEND = import.meta.env.VITE_BACKEND_URL;
 
@@ -130,23 +140,25 @@ export default function GenerateRFQ() {
     }
   };
 
-  const handleResetSession = () => {
-    if (confirm("Are you sure? This will clear the current draft and chat history.")) {
-      setMessages([{
-        id: 'msg-init-new',
-        role: 'assistant',
-        content: "Session reset. I'm ready to help you create a professional RFQ. What would you like to build today?",
-        timestamp: new Date().toISOString(),
-      }]);
-      setDraftText("# New RFQ Spec\n\n");
-      setRetrievedRFQs([]);
-      setSelectedRFQ(null);
-      setReferenceText(null);
-      setRfqId(null); // Reset RFQ ID
-      localStorage.removeItem('rfq_chat_messages');
-      localStorage.removeItem('rfq_draft_text');
-      localStorage.removeItem('rfq_active_id');
-    }
+  /* RESET DIALOG STATE */
+  const [resetDialogOpen, setResetDialogOpen] = useState(false);
+
+  const confirmReset = () => {
+    setMessages([{
+      id: 'msg-init-new',
+      role: 'assistant',
+      content: "Session reset. I'm ready to help you create a professional RFQ. What would you like to build today?",
+      timestamp: new Date().toISOString(),
+    }]);
+    setDraftText("# New RFQ Spec\n\n");
+    setRetrievedRFQs([]);
+    setSelectedRFQ(null);
+    setReferenceText(null);
+    setRfqId(null);
+    localStorage.removeItem('rfq_chat_messages');
+    localStorage.removeItem('rfq_draft_text');
+    localStorage.removeItem('rfq_active_id');
+    setResetDialogOpen(false);
   };
 
   const handleSendMessage = useCallback(
@@ -270,7 +282,7 @@ export default function GenerateRFQ() {
 
   return (
     <MainLayout>
-      <div className="h-[calc(100vh-4rem)] flex flex-col overflow-hidden">
+      <div className="h-[calc(100vh-4rem)] w-full flex flex-col overflow-hidden relative">
         {/* --- Main Toolbar --- */}
         <div className="border-b border-border bg-card p-3 flex items-center justify-between shadow-sm z-50 sticky top-0">
           <div className="flex items-center gap-4">
@@ -298,7 +310,7 @@ export default function GenerateRFQ() {
           </div>
 
           <div className="flex items-center gap-3">
-            <Button variant="outline" size="sm" onClick={handleResetSession} className="text-red-500 hover:text-red-600 hover:bg-red-50">
+            <Button variant="outline" size="sm" onClick={() => setResetDialogOpen(true)} className="text-red-500 hover:text-red-600 hover:bg-red-50">
               <RefreshCw className="w-4 h-4 mr-2" /> New RFQ
             </Button>
             <Button size="sm" onClick={handleExport}>
@@ -396,6 +408,22 @@ export default function GenerateRFQ() {
         </ResizablePanelGroup>
       </div>
 
+      <AlertDialog open={resetDialogOpen} onOpenChange={setResetDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Start New RFQ?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will clear your current draft and chat history. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmReset} className="bg-destructive hover:bg-destructive/90">
+              Start New
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </MainLayout>
   );
 }

@@ -327,14 +327,14 @@ export default function DocumentLibrary() {
         {!loading && (
           <>
             {viewMode === 'list' ? (
-              <div className="rounded-xl border border-border overflow-hidden">
+              <div className="rounded-xl border border-slate-200 bg-white shadow-soft-sm overflow-hidden">
                 <Table>
                   <TableHeader>
-                    <TableRow className="bg-muted/30">
-                      <TableHead className="w-[400px]">Name</TableHead>
-                      <TableHead>Category</TableHead>
-                      <TableHead>Size</TableHead>
-                      <TableHead>Uploaded</TableHead>
+                    <TableRow className="bg-slate-50/50 border-b border-slate-100">
+                      <TableHead className="w-[400px] pl-6 py-4 text-xs font-semibold uppercase tracking-wider text-slate-500">Document Name</TableHead>
+                      <TableHead className="text-xs font-semibold uppercase tracking-wider text-slate-500">Category</TableHead>
+                      <TableHead className="text-xs font-semibold uppercase tracking-wider text-slate-500">Size</TableHead>
+                      <TableHead className="text-xs font-semibold uppercase tracking-wider text-slate-500">Uploaded</TableHead>
                       <TableHead className="w-[50px]"></TableHead>
                     </TableRow>
                   </TableHeader>
@@ -345,35 +345,35 @@ export default function DocumentLibrary() {
                         <TableRow
                           key={doc.id}
                           className={cn(
-                            'hover:bg-muted/30 animate-fade-in'
+                            'group hover:bg-slate-50/80 transition-colors border-b border-slate-50 last:border-0'
                           )}
                           style={{ animationDelay: `${index * 30}ms` }}
                         >
-                          <TableCell>
+                          <TableCell className="pl-6 py-4">
                             <div className="flex items-center gap-3">
-                              <div className="p-2 rounded-lg bg-muted">
+                              <div className={cn("p-2 rounded-lg bg-slate-50 border border-slate-100", fileColors[doc.type] && 'bg-opacity-10')}>
                                 <Icon
-                                  className={cn('w-5 h-5', fileColors[doc.type] || fileColors.unknown)}
+                                  className={cn('w-4 h-4', fileColors[doc.type] || fileColors.unknown)}
                                 />
                               </div>
-                              <span className="font-medium">{doc.name}</span>
+                              <span className="font-medium text-slate-700">{doc.name}</span>
                             </div>
                           </TableCell>
                           <TableCell>
-                            <span className="px-2 py-1 rounded-md bg-muted text-xs">
+                            <span className="inline-flex items-center px-2 py-1 rounded-md bg-slate-100 text-slate-600 text-xs font-medium border border-slate-200">
                               {doc.category}
                             </span>
                           </TableCell>
-                          <TableCell className="text-muted-foreground">
+                          <TableCell className="text-slate-500 text-sm font-mono">
                             {(doc.size / 1024).toFixed(1)} KB
                           </TableCell>
-                          <TableCell className="text-muted-foreground">
-                            {format(new Date(doc.uploadedAt), 'MMM d, yyyy h:mm a')}
+                          <TableCell className="text-slate-500 text-sm">
+                            {format(new Date(doc.uploadedAt), 'MMM d, yyyy')}
                           </TableCell>
                           <TableCell>
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="icon" className="h-8 w-8">
+                                <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-primary">
                                   <MoreVertical className="w-4 h-4" />
                                 </Button>
                               </DropdownMenuTrigger>
@@ -388,7 +388,7 @@ export default function DocumentLibrary() {
                                 </DropdownMenuItem>
                                 <DropdownMenuSeparator />
                                 <DropdownMenuItem
-                                  className="text-destructive"
+                                  className="text-destructive focus:text-destructive"
                                   onClick={() => handleDelete(doc)}
                                 >
                                   <Trash2 className="w-4 h-4 mr-2" />
@@ -411,50 +411,51 @@ export default function DocumentLibrary() {
                     <div
                       key={doc.id}
                       className={cn(
-                        'group rounded-xl bg-card border border-border p-4',
-                        'hover:border-primary/30 transition-all duration-200',
+                        'group relative rounded-xl bg-white border border-slate-200 p-5',
+                        'shadow-soft-sm hover:shadow-soft-md hover:border-primary/20 hover:-translate-y-0.5 transition-all duration-300',
                         'animate-fade-in cursor-pointer'
                       )}
                       style={{ animationDelay: `${index * 30}ms` }}
                     >
-                      <div className="flex items-start justify-between mb-3">
-                        <div className="p-3 rounded-lg bg-muted">
-                          <Icon className={cn('w-8 h-8', fileColors[doc.type] || fileColors.unknown)} />
+                      <div className="flex items-start justify-between mb-4">
+                        <div className={cn("p-3 rounded-lg bg-slate-50 border border-slate-100 group-hover:bg-blue-50/50 group-hover:border-blue-100 transition-colors")}>
+                          <Icon className={cn('w-6 h-6', fileColors[doc.type] || fileColors.unknown)} />
                         </div>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <Button
                               variant="ghost"
                               size="icon"
-                              className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
+                              className="h-8 w-8 text-slate-400 opacity-0 group-hover:opacity-100 transition-all hover:text-primary"
                             >
                               <MoreVertical className="w-4 h-4" />
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
                             <DropdownMenuItem onClick={() => handleView(doc)}>
-                              <Eye className="w-4 h-4 mr-2" />
-                              View
+                              <Eye className="w-4 h-4 mr-2" /> View
                             </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => handleDownload(doc)}>
-                              <Download className="w-4 h-4 mr-2" />
-                              Download
+                              <Download className="w-4 h-4 mr-2" /> Download
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem
-                              className="text-destructive"
+                              className="text-destructive focus:text-destructive"
                               onClick={() => handleDelete(doc)}
                             >
-                              <Trash2 className="w-4 h-4 mr-2" />
-                              Delete
+                              <Trash2 className="w-4 h-4 mr-2" /> Delete
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </div>
-                      <p className="font-medium text-sm truncate mb-1">{doc.name}</p>
-                      <div className="flex items-center justify-between text-xs text-muted-foreground">
-                        <span>{doc.category}</span>
-                        <span className="text-muted-foreground font-medium">
+                      <p className="font-semibold text-sm text-slate-800 truncate mb-1.5" title={doc.name}>
+                        {doc.name}
+                      </p>
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 font-medium">
+                          {doc.category}
+                        </span>
+                        <span className="text-slate-400 font-mono">
                           {(doc.size / 1024).toFixed(1)} KB
                         </span>
                       </div>
