@@ -36,7 +36,7 @@ export default function GenerateRFQ() {
       id: 'msg-init',
       role: 'assistant',
       content:
-        "Hello! I'm ready to help you create a professional RFQ. What would you like to build today?",
+        "Hello! I'm your RFQ Generator assistant. I will help to query historical RFQ, create draft RFQ based on the provided context. What would you like to build today?",
       timestamp: new Date().toISOString(),
     },
   ]);
@@ -360,7 +360,7 @@ export default function GenerateRFQ() {
                   /* Document Preview Mode */
                   selectedRFQ.toLowerCase().endsWith('.pdf') ? (
                     <iframe
-                      src={`${BACKEND}/documents/${selectedRFQ}/view`}
+                      src={`${BACKEND}/documents/view/by-name/${encodeURIComponent(selectedRFQ)}`}
                       className="w-full h-full border-0"
                       title="Preview"
                     />

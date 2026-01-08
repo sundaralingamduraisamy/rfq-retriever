@@ -541,6 +541,27 @@ def view_document_by_id(doc_id: int):
          
     return Response(content=content, media_type=media_type, headers={"Content-Disposition": "inline"})
 
+@app.get("/documents/view/by-name/{filename}")
+def view_document_by_name(filename: str):
+    """Serve raw document content for inline viewing by Filename (For Generator)"""
+    if not db:
+        raise HTTPException(500, "Database connection failed")
+
+    row = db.execute_query_single("SELECT file_content FROM documents WHERE filename=%s", (filename,))
+    if not row:
+        raise HTTPException(404, "Document not found")
+    
+    content = bytes(row[0])
+    ext = filename.split('.')[-1].lower()
+    
+    media_type = "application/pdf"
+    if ext in ["docx", "doc"]:
+        media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    elif ext == "xlsx":
+         media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+         
+    return Response(content=content, media_type=media_type, headers={"Content-Disposition": "inline"})
+
 @app.get("/documents/{doc_id}/download")
 def download_document_by_id(doc_id: int):
     """Serve document content for download by ID"""
