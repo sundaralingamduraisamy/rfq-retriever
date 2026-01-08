@@ -130,7 +130,7 @@ export function ChatInterface({
                       components={{
                         // Professional Table Styling
                         table: ({ node, ...props }) => (
-                          <div className="my-4 w-full overflow-hidden rounded-lg border border-border shadow-sm">
+                          <div className="my-4 w-full overflow-x-auto rounded-lg border border-border shadow-sm">
                             <table className="w-full text-left text-sm" {...props} />
                           </div>
                         ),

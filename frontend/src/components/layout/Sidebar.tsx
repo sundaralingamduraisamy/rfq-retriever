@@ -28,8 +28,12 @@ const navItems = [
   { icon: FolderOpen, label: 'Document Library', path: '/library' },
 ];
 
-export function Sidebar() {
-  const [collapsed, setCollapsed] = useState(false);
+interface SidebarProps {
+  collapsed: boolean;
+  setCollapsed: (collapsed: boolean) => void;
+}
+
+export function Sidebar({ collapsed, setCollapsed }: SidebarProps) {
   const location = useLocation();
   const unreadNotifications = notifications.filter((n) => !n.read).length;
 
@@ -56,7 +60,7 @@ export function Sidebar() {
                     'flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200',
                     'hover:bg-sidebar-accent',
                     isActive
-                      ? 'bg-sidebar-accent text-sidebar-accent-foreground'
+                      ? 'bg-sidebar-accent text-sidebar-accent-foreground font-medium'
                       : 'text-sidebar-foreground'
                   )}
                 >
@@ -67,7 +71,7 @@ export function Sidebar() {
                     )}
                   />
                   {!collapsed && (
-                    <span className={cn('text-sm', isActive && 'font-medium')}>
+                    <span className="text-sm">
                       {item.label}
                     </span>
                   )}
