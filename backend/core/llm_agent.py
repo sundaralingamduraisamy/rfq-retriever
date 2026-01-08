@@ -82,7 +82,7 @@ class ChatAgent:
         """
         print(f"\n   🔧 Tool: update_rfq_draft('{instructions}')")
         
-        if not self.current_draft_context:
+        if self.current_draft_context is None:
             return "Error: No active draft found. Ask the user to start a draft first or provide content.", []
 
         try:
@@ -198,7 +198,7 @@ class ChatAgent:
         ]
         
         # Only enable Edit Tool in AGENT mode and if there is a draft
-        if mode == "agent" and current_draft:
+        if mode == "agent" and current_draft is not None:
             tools_schema.append({
                 "type": "function",
                 "function": {
@@ -226,10 +226,11 @@ class ChatAgent:
 1. **Search**: Use `search_documents` to find info.
 2. **Context**: You can see the current draft if provided.
 """
-        if mode == "agent" and current_draft:
+        if mode == "agent" and current_draft is not None:
             base_prompt += """3. **Editing**: You have the power to EDIT the draft using `update_rfq_draft`. 
-   - If the user asks to change the text, USE THE TOOL.
-   - Do NOT just say "I can do that", actually DO IT."""
+   - **CRITICAL**: If the user asks to write, add, or change content in the Document/PDF, you MUST use the `update_rfq_draft` tool.
+   - **DO NOT** output the draft content in the chat. The user cannot copy-paste easily. They want the document updated automatically.
+   - Just say "Updating the document..." and call the tool."""
    
         context_messages.append(SystemMessage(content=base_prompt))
         

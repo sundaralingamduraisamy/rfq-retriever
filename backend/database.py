@@ -6,6 +6,7 @@ class DatabaseManager:
     """PostgreSQL connection pool manager"""
 
     def __init__(self):
+        self._ensure_database_exists()
         try:
             self.pool = SimpleConnectionPool(
                 1, 5, # ID, Pool Size
@@ -19,6 +20,36 @@ class DatabaseManager:
         except psycopg2.Error as e:
             print(f"❌ Database connection failed: {e}")
             raise
+
+    def _ensure_database_exists(self):
+        """Check if target database exists, if not create it."""
+        from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
+        try:
+            # Connect to default 'postgres' db
+            conn = psycopg2.connect(
+                dbname='postgres',
+                user=settings.POSTGRES_USER,
+                password=settings.POSTGRES_PASSWORD,
+                host=settings.POSTGRES_HOST,
+                port=settings.POSTGRES_PORT
+            )
+            conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
+            cur = conn.cursor()
+            
+            # Check existence
+            cur.execute(f"SELECT 1 FROM pg_catalog.pg_database WHERE datname = '{settings.POSTGRES_DB}'")
+            exists = cur.fetchone()
+            
+            if not exists:
+                print(f"🛠️  Database '{settings.POSTGRES_DB}' not found. Creating...")
+                cur.execute(f"CREATE DATABASE {settings.POSTGRES_DB}")
+                print(f"✅ Database '{settings.POSTGRES_DB}' created successfully.")
+            
+            cur.close()
+            conn.close()
+        except Exception as e:
+            print(f"⚠️ Warning: Could not verify/create database: {e}")
+            # We don't raise here, we let the main connection attempt fail if it must.
 
     def get_connection(self):
         return self.pool.getconn()

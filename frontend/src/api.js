@@ -1,4 +1,4 @@
-const BASE = import.meta.env.VITE_BACKEND_URL || "http://127.0.0.1:8000";
+const BASE = import.meta.env.VITE_BACKEND_URL;
 export const API_BASE_URL = BASE;
 
 export async function chat(payload) {

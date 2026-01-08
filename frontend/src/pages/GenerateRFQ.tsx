@@ -17,7 +17,7 @@ import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 
-const BACKEND = import.meta.env.VITE_BACKEND_URL || "http://127.0.0.1:8000";
+const BACKEND = import.meta.env.VITE_BACKEND_URL;
 
 type RetrievedRFQ = {
   file: string;
