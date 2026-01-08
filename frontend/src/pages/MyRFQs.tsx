@@ -284,7 +284,7 @@ export default function MyRFQs() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      /* PREVIEW STATE */
+      {/* PREVIEW STATE */}
       <DocumentPreviewDialog
         open={previewOpen}
         onOpenChange={setPreviewOpen}
