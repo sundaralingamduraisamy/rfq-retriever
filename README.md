@@ -28,6 +28,26 @@ A powerful Retrieval-Augmented Generation (RAG) system designed to automate the 
 *   Python 3.10+ (for local backend dev)
 *   Node.js 18+ (for local frontend dev)
 
+## 🩺 Quick Start for Reviewers (Team Lead)
+
+If you are cloning this repository for the first time, follow these steps to get a working environment:
+
+1.  **Clone the Repo:**
+    ```bash
+    git clone https://github.com/sundaralingamduraisamy/rfq-retriever.git
+    cd rfq-retriever
+    ```
+2.  **Environment Setup:**
+    - Copy `backend/.env.example` to `backend/.env` and fill in your `LLM_API_KEY` (Groq) and `HUGGINGFACE_TOKEN`.
+    - Copy `frontend/.env.example` to `frontend/.env`.
+3.  **Deploy (Quickest):**
+    ```bash
+    docker-compose up --build
+    ```
+4.  **Verification:**
+    - Open `http://localhost:5173` for the UI.
+    - Open `http://localhost:8000/docs` for the API documentation.
+
 ### 1. Environment Setup
 
 **Backend:**
