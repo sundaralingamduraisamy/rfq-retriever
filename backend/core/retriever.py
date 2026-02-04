@@ -3,6 +3,7 @@ from sentence_transformers import SentenceTransformer
 from database import db
 from settings import settings
 import time
+import torch
 
 from core.embedding_model import get_embedding_model
 
@@ -113,3 +114,59 @@ def get_full_rfq(filename: str) -> str:
     except Exception as e:
         print(f"❌ Error reading full document: {e}")
         return "Error reading document."
+
+def search_images(query: str, top_k: int = 3):
+    """
+    Search for relevant images using CLIP text-image similarity.
+    """
+    if not db:
+        return []
+
+    try:
+        from core.image_processor import get_model
+        model, processor, mod_type = get_model()
+        
+        # 1. Encode Text Query using CLIP
+        inputs = processor(text=[query], return_tensors="pt", padding=True)
+        with torch.no_grad():
+            text_features = model.get_text_features(**inputs)
+        
+        query_vec = text_features[0].tolist()
+        embedding_str = str(query_vec)
+
+        # 2. Search in DB
+        sql_query = """
+            SELECT 
+                di.id,
+                di.description,
+                d.filename,
+                1 - (ie.embedding <=> %s::vector) as similarity,
+                di.image_data
+            FROM image_embeddings ie
+            JOIN document_images di ON ie.image_id = di.id
+            JOIN documents d ON di.document_id = d.id
+            ORDER BY similarity DESC
+            LIMIT %s
+        """
+        
+        results = db.execute_query(sql_query, (embedding_str, top_k))
+        
+        formatted = []
+        for r in results:
+            similarity = float(r[3])
+            print(f"DEBUG: Retrieved Image ID {r[0]} | Similarity: {similarity:.4f} | Desc: {r[1]}")
+            
+            if similarity < 0.05: continue # Lowered Threshold
+            
+            formatted.append({
+                "id": r[0],
+                "description": r[1],
+                "file": r[2],
+                "relevance": round(similarity * 100, 2),
+                "data": r[4] # Binary data for rendering
+            })
+            
+        return formatted
+    except Exception as e:
+        print(f"❌ Image search error: {e}")
+        return []

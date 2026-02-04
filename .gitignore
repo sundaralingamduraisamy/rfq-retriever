@@ -1,15 +1,36 @@
 # General
 .DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+.Spotlight-V100
+.Trashes
+desktop.ini
+thumbs.db
+
+# IDEs and Editors
 .idea/
 .vscode/
-*.log
+*.swp
+*.swo
+.project
+.pydevproject
+.settings/
+*.sublime-project
+*.sublime-workspace
 
 # Environment Variables
 .env
-backend/.env
+.env.local
+.env.*.local
+*.env
 
 # Python (Backend)
+backend/.env
 backend/venv/
+backend/.venv/
+backend/env/
 backend/__pycache__/
 backend/*.pyc
 backend/*.pyo
@@ -18,8 +39,9 @@ backend/*.db
 backend/*.pkl
 backend/*.index
 backend/data/
+backend/exports/*
+!backend/exports/.gitkeep
 backend/faiss_index/
-backend/exports/
 backend/vector.index
 __pycache__/
 *.pyc
@@ -28,4 +50,20 @@ __pycache__/
 frontend/node_modules/
 frontend/dist/
 frontend/build/
+frontend/.env
+frontend/.env.local
 node_modules/
+dist/
+build/
+.npm
+.eslintcache
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Docker
+.docker

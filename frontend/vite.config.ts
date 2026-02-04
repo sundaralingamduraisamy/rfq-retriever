@@ -20,7 +20,7 @@ export default defineConfig(({ mode }) => {
     // Ignore error, use default
   }
 
-  const backendUrl = `http://localhost:${backendPort}`;
+  const backendUrl = `http://127.0.0.1:${backendPort}`;
 
   return {
     server: {

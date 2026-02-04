@@ -1,4 +1,6 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { saveRfq, getRfqDetail } from '@/api';
 import { Trash2, Edit2, Check, X, File, FileText, Download, RefreshCw, Zap, User, Bot, Save } from 'lucide-react';
@@ -96,6 +98,38 @@ export default function GenerateRFQ() {
     const saved = localStorage.getItem('rfq_active_id');
     return saved ? Number(saved) : null;
   });
+
+  const [rawMode, setRawMode] = useState(false);
+
+  // Process draft text to replace [[IMAGE_ID:n]] and format headers/spacing
+  const processedDraftText = useMemo(() => {
+    let text = draftText || "";
+
+    // Stage 1: Replace [[IMAGE_ID:n]] in markdown targets
+    text = text.replace(/\(\[\[IMAGE_ID:(\d+)\]\]\)/g, `(${BACKEND}/images/$1)`);
+
+    // Stage 2: Replace stand-alone [[IMAGE_ID:n]] tags
+    text = text.replace(/\[\[IMAGE_ID:(\d+)\]\]/g, (match, id) => {
+      return `\n\n![VISION COMPONENT: ID ${id}](${BACKEND}/images/${id})\n\n`;
+    });
+
+    // Stage 3: Smart Heading Transformer (Detect "1. Title" or "1.1 Title")
+    // This ensures headings are bold and have gaps without the user needing to type "#"
+    const lines = text.split('\n');
+    const transformedLines = lines.map(line => {
+      const trimmed = line.trim();
+      // Match "1. Title" or "1.1 Title" or "Section 1: Title"
+      if (/^(\d+\.|\d+\.\d+|Section\s+\d+:)/i.test(trimmed) && trimmed.length < 100) {
+        // Force it to be a Markdown H2 if it's not already a header
+        if (!trimmed.startsWith('#')) {
+          return `## ${trimmed}`;
+        }
+      }
+      return line;
+    });
+
+    return transformedLines.join('\n');
+  }, [draftText]);
 
   // PERSISTENCE EFFECTS
   useEffect(() => {
@@ -201,7 +235,10 @@ export default function GenerateRFQ() {
 
         // Update Draft (If Agent Edited)
         if (data.updated_draft) {
+          console.log("📝 Agent updated the draft. Length:", data.updated_draft.length);
           setDraftText(data.updated_draft);
+        } else {
+          console.log("ℹ️ AI Response did not include a draft update.");
         }
 
         // Add LLM response to messages
@@ -265,19 +302,31 @@ export default function GenerateRFQ() {
   const handleExport = async () => {
     if (!draftText) return;
 
-    const res = await fetch(`${BACKEND}/export/pdf`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: draftText }),
-    });
+    try {
+      const res = await fetch(`${BACKEND}/export/pdf`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: draftText }),
+      });
 
-    const blob = await res.blob();
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'RFQ.pdf';
-    a.click();
-    window.URL.revokeObjectURL(url);
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || "Export failed");
+      }
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `RFQ_${rfqId || 'Draft'}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    } catch (e: any) {
+      console.error("Export Error:", e);
+      alert(`Export failed: ${e.message}`);
+    }
   };
 
   return (
@@ -313,7 +362,7 @@ export default function GenerateRFQ() {
             <Button variant="outline" size="sm" onClick={() => setResetDialogOpen(true)} className="text-red-500 hover:text-red-600 hover:bg-red-50">
               <RefreshCw className="w-4 h-4 mr-2" /> New RFQ
             </Button>
-            <Button size="sm" onClick={handleExport}>
+            <Button size="sm" onClick={handleExport} className="bg-primary hover:bg-primary/90 shadow-md">
               <Download className="w-4 h-4 mr-2" /> Export PDF
             </Button>
           </div>
@@ -344,11 +393,20 @@ export default function GenerateRFQ() {
           <ResizablePanel defaultSize={60} minSize={30}>
             <div className="h-full bg-card flex flex-col">
               <div className="flex items-center justify-between border-b border-border p-3 bg-muted/20">
-                <span className="font-semibold text-sm flex items-center gap-2">
+                <span className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+                  <Bot className="w-4 h-4 text-blue-500" />
                   {rfqId ? <Badge variant="outline" className="text-xs">ID: {rfqId}</Badge> : null}
-                  Draft Editor
+                  Professional RFQ Draft
                 </span>
                 <div className="flex items-center gap-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-[10px] uppercase font-bold text-slate-400 hover:text-slate-600"
+                    onClick={() => setRawMode(!rawMode)}
+                  >
+                    {rawMode ? "Show Preview" : "Edit Source"}
+                  </Button>
                   <Button variant="outline" size="sm" onClick={handleSave} disabled={saveStatus === "saving"}>
                     <Save className="w-4 h-4 mr-2" />
                     {saveStatus === "saving" ? "Saving..." : saveStatus === "saved" ? "Saved" : "Save"}
@@ -383,12 +441,45 @@ export default function GenerateRFQ() {
                   )
                 ) : (
                   /* Persistent Draft Editor */
-                  <textarea
-                    className={`w-full h-full p-8 resize-none focus:outline-none font-mono text-sm leading-relaxed transition-colors ${draftMode === 'agent' ? 'bg-muted/5' : 'bg-background'}`}
-                    value={draftText}
-                    onChange={(e) => setDraftText(e.target.value)}
-                    placeholder="# Start your RFQ here..."
-                  />
+                  <div className="w-full h-full overflow-hidden flex flex-col">
+                    {rawMode ? (
+                      <textarea
+                        className={`w-full h-full p-8 resize-none focus:outline-none font-mono text-sm leading-relaxed transition-colors ${draftMode === 'agent' ? 'bg-muted/5' : 'bg-background'}`}
+                        value={draftText}
+                        onChange={(e) => setDraftText(e.target.value)}
+                        placeholder="# Start your RFQ here..."
+                      />
+                    ) : (
+                      <ScrollArea className="flex-1 bg-white">
+                        <div className="p-10 max-w-4xl mx-auto prose prose-slate prose-sm md:prose-base !prose-headings:text-slate-900 !prose-p:text-slate-600 prose-img:rounded-xl prose-img:shadow-lg">
+                          <ReactMarkdown
+                            remarkPlugins={[remarkGfm]}
+                            components={{
+                              h2: ({ node, ...props }) => (
+                                <h2 className="text-2xl font-extrabold text-[#006680] mt-16 mb-8 border-b-2 pb-3 border-slate-200 uppercase tracking-tight" {...props} />
+                              ),
+                              p: ({ node, ...props }) => (
+                                <p className="mb-12 leading-[1.8] whitespace-pre-wrap text-slate-800 font-sans text-lg" {...props} />
+                              ),
+                              img: ({ node, ...props }) => (
+                                <div className="my-12 flex flex-col items-center">
+                                  <img
+                                    {...props}
+                                    className="max-h-[600px] w-full object-contain rounded-2xl shadow-2xl border border-slate-200"
+                                  />
+                                  <span className="mt-4 text-[11px] uppercase tracking-[0.2em] text-slate-500 font-black bg-slate-100 px-4 py-2 rounded-full border border-slate-200 shadow-sm">
+                                    {props.alt || "Vision Component Illustration"}
+                                  </span>
+                                </div>
+                              )
+                            }}
+                          >
+                            {processedDraftText}
+                          </ReactMarkdown>
+                        </div>
+                      </ScrollArea>
+                    )}
+                  </div>
                 )}
 
                 {/* Floating Action for selected doc (optional) */}

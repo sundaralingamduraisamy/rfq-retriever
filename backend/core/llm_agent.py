@@ -1,12 +1,14 @@
 from typing import List, Dict, Optional, Tuple
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
 import traceback
+import re
+import json
 
 # Import existing singletons/config
 from settings import settings
 from database import db
 from core.llm_provider import llm
-from core.retriever import hybrid_search
+from core.retriever import hybrid_search, search_images
 from core.prompt_loader import load_prompt
 
 def clean_text(text: str) -> str:
@@ -31,6 +33,7 @@ class ChatAgent:
             "list_all_documents": self._list_all_documents,
             "get_full_summary": self._get_full_summary,
             "update_rfq_draft": self._update_rfq_draft,
+            "search_images": self._search_images,
         }
 
     def _search_documents(self, query: str):
@@ -55,10 +58,36 @@ class ChatAgent:
             found_docs.append({
                 "file": src["file"],
                 "score": item["relevance"],
-                "preview": preview
+                "preview": preview,
+                "full_text": item["text"]
             })
 
         return summary, found_docs
+
+    def _search_images(self, query: str):
+        """Search for relevant past automotive images using vector similarity"""
+        print(f"\n   🔧 Tool: search_images('{query}')")
+        images = search_images(query)
+        
+        # SLICE TO MAXIMUM OF 3 IMAGES
+        if images:
+            images = images[:3]
+        
+        if not images:
+            return "No relevant automobile images found.", []
+            
+        summary = f"Found {len(images)} relevant images:\n\n"
+        found_imgs = []
+        for i, img in enumerate(images, 1):
+            summary += f"{i}. [ID: {img['id']}] Description: {img['description']} (from {img['file']}) (Score: {img['relevance']}%)\n"
+            found_imgs.append({
+                "file": img['file'],
+                "image_id": img['id'],
+                "description": img['description'],
+                "text": f"IMAGE INFO: [ID: {img['id']}] Description: {img['description']}"
+            })
+            
+        return summary, found_imgs
 
     def _get_full_summary(self, filename: str):
         """Get the complete summary text of a document by filename"""
@@ -72,11 +101,12 @@ class ChatAgent:
             (filename,)
         )
         if row:
-            return f"Complete summary for {filename}:\n{row[0]}", [{"file": filename, "score": 100, "preview": "Full Document Accessed"}]
+            return f"Complete summary for {filename}:\n{row[0]}", [{"file": filename, "score": 100, "preview": "Full Document Accessed", "full_text": row[0]}]
         return "Summary not found.", []
 
-    def _update_rfq_draft(self, instructions: str):
+    def _update_rfq_draft(self, instructions: str, context_docs: List[Dict] = []):
         """
+        Internal tool to update the draft editor.
         Update the current RFQ draft based on specific user instructions.
         Uses the 'current_draft_context' stored in the agent.
         """
@@ -87,9 +117,23 @@ class ChatAgent:
 
         try:
             # 1. Apply Edit
+            context_parts = []
+            for d in context_docs:
+                filename = d.get("file") or (d.get("source", {}).get("file")) or "Unknown Source"
+                text = d.get("full_text") or d.get("text") or d.get("preview") or ""
+                image_id = d.get("image_id")
+                
+                if image_id:
+                    context_parts.append(f"IMAGE AVAILABLE: [[IMAGE_ID:{image_id}]] - Description: {d.get('description', '')}")
+                elif text:
+                    context_parts.append(f"SOURCE: {filename}\n{text}")
+            
+            context_text = "\n\n".join(context_parts)
+            
             edit_prompt = load_prompt("edit_rfq_user.md", 
                                       instruction=instructions, 
-                                      current_text=self.current_draft_context)
+                                      current_text=self.current_draft_context,
+                                      context_documents=context_text)
             
             # Helper for sub-calls
             def sub_invoke(sys_file, user_text):
@@ -101,6 +145,27 @@ class ChatAgent:
 
             updated_text = sub_invoke("edit_rfq_system.md", edit_prompt)
             updated_text = clean_text(updated_text)
+            
+            # --- IMAGE ID HALLUCINATION GUARD ---
+            # --- IMAGE ID HALLUCINATION GUARD ---
+            # Extract all valid image IDs from the context provided to the sub-agent
+            valid_ids = [str(d.get("image_id")) for d in context_docs if d.get("image_id")]
+            
+            # Find all tags the agent actually wrote
+            matches = re.findall(r"\[\[IMAGE_ID:(\d+)\]\]", updated_text)
+            
+            if not valid_ids:
+                # Scenario A: No images are available at all.
+                # If the agent hallucinated a tag, we MUST remove it to avoid 404s.
+                for mid in matches:
+                    print(f"⚠️ Hallucination Guard: Removing hallucinated Image ID {mid} (No images available)")
+                    updated_text = updated_text.replace(f"[[IMAGE_ID:{mid}]]", "")
+            else:
+                # Scenario B: Images exist, but agent might have used a wrong/made-up ID.
+                for mid in matches:
+                    if mid not in valid_ids:
+                        print(f"⚠️ Hallucination Guard: Correcting Image ID {mid} -> {valid_ids[0]}")
+                        updated_text = updated_text.replace(f"[[IMAGE_ID:{mid}]]", f"[[IMAGE_ID:{valid_ids[0]}]]")
             
             # 2. Analyze Impact
             analysis_prompt = load_prompt("analyze_changes_user.md", 
@@ -121,6 +186,60 @@ class ChatAgent:
             traceback.print_exc()
             return f"Failed to update draft: {str(e)}", []
 
+
+    def _rescue_tool_calls(self, text: str, iteration: int) -> List[Dict]:
+        """Rescue hallucinated tool calls from raw text when native calling fails."""
+        tool_calls = []
+        # Pattern 1: <function=name{"arg": "val"}></function>
+        # Pattern 2: function=name{"arg": "val"}
+        # Pattern 3: name(query="vals") 
+        # Pattern 4: name query="vals"
+        
+        patterns = [
+            r"function=(\w+)\s*(\{.*?\})",                         # function=name{...}
+            r"<function=(\w+)\s*(\{.*?\}).*?</function>",          # <function=name{...}></function>
+            r"(\w+)\((.*?)\)",                                     # name(args)
+            r"(\w+)\s+query=[\"'](.*?)[\"']",                      # name query="..."
+            r"(\w+)\s+instructions=[\"'](.*?)[\"']",               # name instructions="..."
+            r"(\w+)\s+insstructions=[\"'](.*?)[\"']",              # name insstructions="..." (typo fix)
+            r"(\w+)\s+filename=[\"'](.*?)[\"']"                    # name filename="..."
+        ]
+        
+        for pattern in patterns:
+            for match in re.finditer(pattern, text, re.DOTALL):
+                name = match.group(1)
+                raw_args = match.group(2)
+                
+                # Check if name is real
+                if name not in self.tools:
+                    continue
+                    
+                args = {}
+                try:
+                    # Try JSON first
+                    args = json.loads(raw_args)
+                except:
+                    # Fallback for name(query="...") style
+                    # Extract key="val" pairs
+                    arg_matches = re.findall(r"(\w+)=[\"'](.*?)[\"']", raw_args)
+                    if arg_matches:
+                        args = {k: v for k, v in arg_matches}
+                        # Map typo
+                        if "insstructions" in args:
+                            args["instructions"] = args.pop("insstructions")
+                    elif len(raw_args.strip()) > 0 and len(arg_matches) == 0:
+                        # Single positional-ish arg
+                        if name == "search_documents" or name == "search_images":
+                            args = {"query": raw_args.strip().strip('"').strip("'")}
+                        elif name == "update_rfq_draft":
+                            args = {"instructions": raw_args.strip().strip('"').strip("'")}
+                        elif name == "get_full_summary":
+                            args = {"filename": raw_args.strip().strip('"').strip("'")}
+
+                if name and (args or name == "list_all_documents"):
+                    tool_calls.append({"name": name, "args": args, "id": f"rescue_{iteration}_{len(tool_calls)}"})
+        
+        return tool_calls
 
     def _list_all_documents(self, _: str = ""):
         """List all indexed documents in the database"""
@@ -160,14 +279,11 @@ class ChatAgent:
                 "type": "function",
                 "function": {
                     "name": "search_documents",
-                    "description": "Search for documents (Knowledge Base). Use for research or finding info.",
+                    "description": "Find technical information in manuals.",
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "query": {
-                                "type": "string",
-                                "description": "The search query"
-                            }
+                            "query": {"type": "string", "description": "Search term"}
                         },
                         "required": ["query"]
                     }
@@ -189,9 +305,26 @@ class ChatAgent:
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "filename": {"type": "string", "description": "The exact filename of the document"}
+                            "filename": {
+                                "type": "string", 
+                                "description": "The EXACT filename of the document as shown in the file list (e.g., 'manual_v1.pdf')."
+                            }
                         },
                         "required": ["filename"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "search_images",
+                    "description": "Find technical diagrams of car parts.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {"type": "string", "description": "Part name (e.g. 'brake')"}
+                        },
+                        "required": ["query"]
                     }
                 }
             }
@@ -209,7 +342,7 @@ class ChatAgent:
                         "properties": {
                             "instructions": {
                                 "type": "string", 
-                                "description": "Precise instructions for the edit (e.g. 'Add a section on Lithium Batteries')"
+                                "description": "Detailed instructions for the current edit (e.g. 'Add a technical section on battery safety using info from source X')."
                             }
                         },
                         "required": ["instructions"]
@@ -222,15 +355,25 @@ class ChatAgent:
         found_documents = []
         
         # System prompt
-        base_prompt = """You are an intelligent RFQ Assistant.
-1. **Search**: Use `search_documents` to find info.
-2. **Context**: You can see the current draft if provided.
-"""
-        if mode == "agent" and current_draft is not None:
-            base_prompt += """3. **Editing**: You have the power to EDIT the draft using `update_rfq_draft`. 
-   - **CRITICAL**: If the user asks to write, add, or change content in the Document/PDF, you MUST use the `update_rfq_draft` tool.
-   - **DO NOT** output the draft content in the chat. The user cannot copy-paste easily. They want the document updated automatically.
-   - Just say "Updating the document..." and call the tool."""
+        base_prompt = """You are a Senior Automotive RFQ Specialist. 
+Follow this Autonomous Workflow for ANY component mentioned:
+
+1. AUTO-RESEARCH: Call `search_documents` and `search_images`.
+2. AUTO-DRAFT: Use `update_rfq_draft` to create a HIGH-DETAIL 11-SECTION RFQ immediately.
+3. DATA INTEGRATION: Use 100% of technical specs (ISO/SAE/IATF) from search.
+4. IMAGE PRECISION: Insert ONLY real [[IMAGE_ID:n]] tags found. Never guest IDs.
+
+STRUCTURE:
+# [Component] RFQ Spec
+## 1. Request for Quotation
+## 2. Overview
+## 3. Technical Specifications (Include ISO/SAE Standards)
+## 4. Performance Requirements
+## 5. Quality Requirements
+## 10. Technical Diagrams (Insert real [[IMAGE_ID:n]] here)
+## 11. Revision History
+
+Output the final draft immediately in the professional editor."""
    
         context_messages.append(SystemMessage(content=base_prompt))
         
@@ -254,18 +397,26 @@ class ChatAgent:
         # Process with loop (max 3 tool calls)
         for iteration in range(3):
             try:
-                # Invoke with tools bound
+                # 0. Invoke with tools bound
                 response = llm_with_tools.invoke(context_messages)
                 
-                # Check for tool calls
-                if response.tool_calls:
-                    print(f"🛠️ Tool Call Detected (Iter {iteration}): {response.tool_calls}")
+                # 1. Native Check
+                tool_calls = getattr(response, "tool_calls", [])
+                
+                # 2. Text-based Check (If response has content but no native calls)
+                if not tool_calls and response.content:
+                    tool_calls = self._rescue_tool_calls(response.content, iteration)
+
+                # Handle Tool Calls
+                if tool_calls:
+                    print(f"🛠️ Tool Call Detected (Iter {iteration}): {tool_calls}")
                     
-                    # Append assistant's tool call message
+                    # Ensure tool_calls is on the message for history
+                    response.tool_calls = tool_calls
                     context_messages.append(response)
                     
                     # Execute each tool call
-                    for tool_call in response.tool_calls:
+                    for tool_call in tool_calls:
                         tool_name = tool_call["name"]
                         args = tool_call["args"]
                         tool_call_id = tool_call["id"]
@@ -279,9 +430,12 @@ class ChatAgent:
                             tool_result_text, tool_docs = self._get_full_summary(args.get("filename", ""))
                         elif tool_name == "list_all_documents":
                             tool_result_text, tool_docs = self._list_all_documents()
+                        elif tool_name == "search_images":
+                            tool_result_text, tool_docs = self._search_images(args.get("query", ""))
                         elif tool_name == "update_rfq_draft":
                              # This tool modifies internal state (pending_update)
-                            tool_result_text, tool_docs = self._update_rfq_draft(args.get("instructions", ""))
+                             # PASS COLLECTED DOCS FOR CONTEXT
+                            tool_result_text, tool_docs = self._update_rfq_draft(args.get("instructions", ""), found_documents)
                         
                         # Collect docs
                         found_documents.extend(tool_docs)
@@ -301,14 +455,54 @@ class ChatAgent:
                 return response_text, found_documents, self.pending_update
                 
             except Exception as e:
-                print(f"❌ Agent Error: {e}")
-                # Fallback: if tool binding fails, just try raw LLM one last time
+                err_str = str(e)
+                print(f"❌ Agent Tool Error: {err_str}")
+                
+                # RESCUE ATTEMPT: If Groq errored but the error message contains the tool call
+                # (Common in 400 errors where the model outputs invalid XML)
+                rescued_calls = self._rescue_tool_calls(err_str, iteration)
+                
+                if rescued_calls:
+                    print(f"🩹 Rescued {len(rescued_calls)} calls from error message!")
+                    # Synthesize an AI message with tool calls
+                    rescue_msg = AIMessage(content="Attempting rescued tool call...", tool_calls=rescued_calls)
+                    context_messages.append(rescue_msg)
+                    
+                    for tool_call in rescued_calls:
+                        tool_name = tool_call["name"]
+                        args = tool_call["args"]
+                        tool_call_id = tool_call["id"]
+                        
+                        tool_result_text = "Error: Tool failed"
+                        try:
+                            if tool_name in self.tools:
+                                # Special handling for draft update to pass docs
+                                if tool_name == "update_rfq_draft":
+                                    res = self._update_rfq_draft(args.get("instructions", ""), found_documents)
+                                else:
+                                    res = self.tools[tool_name](**args)
+                                    
+                                if isinstance(res, tuple):
+                                    tool_result_text, tool_docs = res
+                                    found_documents.extend(tool_docs)
+                                else:
+                                    tool_result_text = str(res)
+                        except Exception as te:
+                            tool_result_text = f"Tool Execution Error: {te}"
+
+                        context_messages.append(ToolMessage(
+                            content=tool_result_text,
+                            tool_call_id=tool_call_id
+                        ))
+                    continue # Try again after rescue
+                
+                # Final Fallback
                 if iteration == 0:
                      try:
                         return llm.invoke(context_messages).content, [], None
                      except:
                         pass
-                return "I apologize, but I encountered an error. Please try again.", [], None
+                return f"I encountered an issue while processing tools: {err_str}", [], None
         
         return "I found some information but need more specific guidance.", found_documents, self.pending_update
 

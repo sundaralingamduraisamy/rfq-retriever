@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     LLM_API_KEY: str
     LLM_MODEL_NAME: str
     LLM_TEMPERATURE: float
+    HUGGINGFACE_TOKEN: Optional[str] = None
 
     # Conflict/Secondary LLM (Optional)
     CONFLICT_LLM_PROVIDER: Optional[str] = None

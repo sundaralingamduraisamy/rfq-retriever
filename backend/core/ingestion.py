@@ -11,6 +11,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 llm = get_llm()
 
 from core.embedding_model import get_embedding_model
+from core.image_processor import image_processor
 
 class EmbeddingIndexer:
     """
@@ -40,7 +41,7 @@ class EmbeddingIndexer:
             print(f"⚠️ Summarization failed: {e}")
             return text[:1000] # Fallback
 
-    def index_document(self, filename: str, file_content: bytes, category: str = "General") -> bool:
+    def index_document(self, filename: str, file_content: bytes, category: str = "General") -> dict:
         """
         Main indexing function:
         1. Store PDF binary in DB with category
@@ -69,7 +70,7 @@ class EmbeddingIndexer:
             # Get Document ID
             doc_id_row = db.execute_query_single("SELECT id FROM documents WHERE filename = %s", (filename,))
             if not doc_id_row:
-                return False
+                return {"success": False, "error": "DB record not found"}
             doc_id = doc_id_row[0]
 
             # 2. Extract Text based on file type
@@ -99,11 +100,31 @@ class EmbeddingIndexer:
                     full_text += "\n"
             else:
                 print(f"❌ Unsupported file type: {file_ext}")
-                return False
+                return {"success": False, "error": "Unsupported file type"}
+
+            # --- New: Image Extraction and Filtering ---
+            print(f"   📸 Extracting and filtering images...")
+            processed_images = image_processor.process_content(file_content, file_ext)
+            
+            auto_count = sum(1 for img in processed_images if img["is_automobile"])
+            non_auto_count = len(processed_images) - auto_count
+            
+            if auto_count > 0:
+                print(f"   ✅ Found {auto_count} automobile-related images. Saving to DB...")
+                image_processor.save_images_to_db(doc_id, processed_images)
+            
+            image_stats = {
+                "total": len(processed_images),
+                "automobile": auto_count,
+                "non_automobile": non_auto_count,
+                "has_automobile": auto_count > 0,
+                "has_non_automobile": non_auto_count > 0
+            }
+            # ------------------------------------------
 
             if not full_text.strip():
                 print("❌ No text extracted")
-                return False
+                return {"success": False, "error": "No text content", "image_stats": image_stats}
 
             # 3. Summarize
             print("   Generating summary...")
@@ -132,7 +153,7 @@ class EmbeddingIndexer:
             # Get Summary ID
             summary_id_row = db.execute_query_single("SELECT id FROM document_summaries WHERE document_id = %s", (doc_id,))
             if not summary_id_row:
-                return False
+                return {"success": False, "error": "Summary record not found", "image_stats": image_stats}
             summary_id = summary_id_row[0]
 
             # Store Vector
@@ -147,13 +168,13 @@ class EmbeddingIndexer:
             )
 
             print(f"✅ Successfully indexed {filename}")
-            return True
+            return {"success": True, "image_stats": image_stats}
 
         except Exception as e:
             print(f"❌ Indexing error: {e}")
             import traceback
             traceback.print_exc()
-            return False
+            return {"success": False, "error": str(e)}
 
 # Global instance
 indexer = EmbeddingIndexer()

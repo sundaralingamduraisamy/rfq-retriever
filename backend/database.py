@@ -11,7 +11,7 @@ class DatabaseManager:
             self.pool = SimpleConnectionPool(
                 1, 5, # ID, Pool Size
                 host=settings.POSTGRES_HOST,
-                port=settings.POSTGRES_PORT,
+                port=int(settings.POSTGRES_PORT),
                 user=settings.POSTGRES_USER,
                 password=settings.POSTGRES_PASSWORD,
                 database=settings.POSTGRES_DB,
@@ -31,7 +31,7 @@ class DatabaseManager:
                 user=settings.POSTGRES_USER,
                 password=settings.POSTGRES_PASSWORD,
                 host=settings.POSTGRES_HOST,
-                port=settings.POSTGRES_PORT
+                port=int(settings.POSTGRES_PORT)
             )
             conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
             cur = conn.cursor()
@@ -160,6 +160,24 @@ class DatabaseManager:
                 status TEXT DEFAULT 'draft',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS document_images (
+                id SERIAL PRIMARY KEY,
+                document_id INTEGER REFERENCES documents(id) ON DELETE CASCADE,
+                image_data BYTEA NOT NULL,
+                description TEXT,
+                metadata JSONB,
+                extracted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS image_embeddings (
+                id SERIAL PRIMARY KEY,
+                image_id INTEGER REFERENCES document_images(id) ON DELETE CASCADE,
+                embedding vector(768),
+                UNIQUE(image_id)
             );
             """
         ]

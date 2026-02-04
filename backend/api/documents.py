@@ -14,29 +14,32 @@ router = APIRouter()
 
 @router.get("/documents")
 def list_documents():
-    """List documents from PostgreSQL"""
+    """List documents from PostgreSQL with image status"""
     if not db:
         raise HTTPException(500, "Database connection failed")
     
-    # Query DB - include category
+    # Query DB - include count of images
     results = db.execute_query("""
-        SELECT id, filename, category, file_size, uploaded_at 
-        FROM documents 
-        ORDER BY uploaded_at DESC
+        SELECT d.id, d.filename, d.category, d.file_size, d.uploaded_at,
+               (SELECT COUNT(*) FROM document_images di WHERE di.document_id = d.id) as img_count
+        FROM documents d
+        ORDER BY d.uploaded_at DESC
     """)
     
     files = []
     for row in results:
-        doc_id, filename, category, size, uploaded_at = row
+        doc_id, filename, category, size, uploaded_at, img_count = row
         ext = filename.split(".")[-1].lower() if "." in filename else "unknown"
         
         files.append({
-            "id": str(doc_id), # Use DB ID for uniqueness
+            "id": str(doc_id),
             "name": filename,
             "type": ext,
-            "category": category or "General",  # Default if null
+            "category": category or "General",
             "size": size,
             "uploadedAt": uploaded_at.isoformat() if uploaded_at else "",
+            "hasAutomobileImages": img_count > 0,
+            "imageCount": img_count,
             "relevanceScore": 100
         })
         
@@ -59,12 +62,16 @@ async def upload_document(file: UploadFile = File(...), category: str = Form("Ge
         content = await file.read()
         
         # Trigger Indexer with category
-        success = indexer.index_document(file.filename, content, category)
+        result = indexer.index_document(file.filename, content, category)
         
-        if success:
-            return {"filename": file.filename, "status": "Uploaded & Indexed Successfully"}
+        if result["success"]:
+            return {
+                "filename": file.filename, 
+                "status": "Uploaded & Indexed Successfully",
+                "image_stats": result.get("image_stats", {})
+            }
         else:
-             raise HTTPException(500, "Failed to index document")
+             raise HTTPException(500, result.get("error", "Failed to index document"))
              
     except Exception as e:
         print(f"Upload error: {e}")
@@ -181,3 +188,21 @@ def download_document_by_id(doc_id: int):
     if ext == "pdf": media_type = "application/pdf"
     
     return Response(content=content, media_type=media_type, headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+@router.get("/images/{image_id}")
+def get_image(image_id: int):
+    """Serve binary image data from DB"""
+    if not db:
+        raise HTTPException(500, "Database connection failed")
+
+    row = db.execute_query_single("SELECT image_data, metadata FROM document_images WHERE id = %s", (image_id,))
+    if not row:
+        raise HTTPException(404, "Image not found")
+    
+    image_bytes = bytes(row[0])
+    metadata = row[1] or {}
+    
+    # Try to get mime type from metadata, default to image/png
+    mime_type = metadata.get("mime_type", "image/png")
+    
+    return Response(content=image_bytes, media_type=mime_type)

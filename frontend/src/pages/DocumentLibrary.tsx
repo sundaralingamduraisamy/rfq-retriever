@@ -12,7 +12,12 @@ import {
   FolderOpen,
   Grid,
   List,
+  CheckCircle2,
+  XCircle,
+  AlertCircle,
+  Image as ImageIcon
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { DocumentPreviewDialog } from '@/components/common/DocumentPreviewDialog';
 import { Input } from '@/components/ui/input';
@@ -76,6 +81,9 @@ interface Document {
   size: number;
   uploadedAt: string;
   relevanceScore: number;
+  hasAutomobileImages?: boolean;
+  hasNonAutomobileImages?: boolean;
+  imageCount?: number;
 }
 
 export default function DocumentLibrary() {
@@ -150,14 +158,41 @@ export default function DocumentLibrary() {
         body: formData,
       });
 
-      if (!response.ok) throw new Error('Upload failed');
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Upload failed');
+      }
+
+      const result = await response.json();
+      const stats = result.image_stats;
+
+      // Show success toast with color indicators
+      toast.success("Document Uploaded Successfully", {
+        description: (
+          <div className="mt-2 space-y-2">
+            <p className="text-xs text-muted-foreground">{pendingFile.name} has been processed.</p>
+            <div className="flex gap-4">
+              {stats?.has_automobile && (
+                <div className="flex items-center gap-1 text-green-600 font-medium text-xs">
+                  <CheckCircle2 className="w-3 h-3" /> Automobile Images Detected
+                </div>
+              )}
+              {stats?.has_non_automobile && (
+                <div className="flex items-center gap-1 text-red-600 font-medium text-xs">
+                  <XCircle className="w-3 h-3" /> Non-Automobile Images Found
+                </div>
+              )}
+              {!stats?.has_automobile && !stats?.has_non_automobile && (
+                <div className="text-xs text-muted-foreground">No images found in document.</div>
+              )}
+            </div>
+          </div>
+        ),
+        duration: 5000,
+      });
 
       // Refresh list
       await fetchDocuments();
-
-      // Reset
-      setPendingFile(null);
-      setCategory('General');
     } catch (error) { // eslint-disable-next-line
       alert("Upload failed: " + (error as any).message);
     } finally {
@@ -357,6 +392,12 @@ export default function DocumentLibrary() {
                                 />
                               </div>
                               <span className="font-medium text-slate-700">{doc.name}</span>
+                              {doc.hasAutomobileImages && (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-green-50 text-green-600 border border-green-100">
+                                  <CheckCircle2 className="w-2.5 h-2.5" />
+                                  VISION ({doc.imageCount})
+                                </span>
+                              )}
                             </div>
                           </TableCell>
                           <TableCell>
@@ -448,9 +489,17 @@ export default function DocumentLibrary() {
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </div>
-                      <p className="font-semibold text-sm text-slate-800 truncate mb-1.5" title={doc.name}>
+                      <p className="font-semibold text-sm text-slate-800 truncate mb-1" title={doc.name}>
                         {doc.name}
                       </p>
+                      {doc.hasAutomobileImages && (
+                        <div className="flex items-center gap-1 mb-1.5">
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-green-50 text-green-600 border border-green-100">
+                            <CheckCircle2 className="w-2.5 h-2.5" />
+                            VISION ({doc.imageCount})
+                          </span>
+                        </div>
+                      )}
                       <div className="flex items-center justify-between text-xs">
                         <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 font-medium">
                           {doc.category}
