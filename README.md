@@ -85,6 +85,8 @@ cd backend
 pip install -r requirements.txt
 python main.py
 ```
+> [!NOTE]
+> If running locally, ensure you have a PostgreSQL instance running with the `pgvector` extension installed. Docker setup handles this automatically.
 
 **Frontend:**
 ```bash
