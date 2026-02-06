@@ -227,9 +227,8 @@ def render_pdf(rfq: dict, no: int) -> bytes:
             # --- Header Detection ---
             if line.startswith('### '):
                 story.append(Paragraph(line[4:], styles["Heading3"]))
-            elif line.startswith('## ') or re.match(r'^(Section\s+\d+:|(?:\d+\.)+\d*\s+)', line):
-                clean_header = re.sub(r'^##\s*', '', line).strip()
-                story.append(Paragraph(clean_header, styles["Heading2"]))
+            elif line.startswith('## '):
+                story.append(Paragraph(line[3:].strip(), styles["Heading2"]))
             elif line.startswith('# '):
                 header_text = line[2:].strip()
                 # Skip TABLE OF CONTENTS - it's auto-generated on page 2

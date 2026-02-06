@@ -423,7 +423,7 @@ class ChatAgent:
                              # PASS COLLECTED DOCS FOR CONTEXT
                             tool_result_text, tool_docs = self._update_rfq_draft(args.get("instructions", ""), found_documents)
                         
-                        # Collect docs
+                        # Collect docs IMMEDIATELY so subsequent tools in this turn can see them
                         found_documents.extend(tool_docs)
                         
                         # Append tool output message
