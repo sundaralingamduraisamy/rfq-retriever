@@ -9,6 +9,10 @@ from pydantic import BaseModel
 from settings import settings
 from database import db
 
+# Configure logging before importing other modules
+from logging_config import setup_logging
+setup_logging()
+
 # Import API Routers
 from api import documents, rfqs, generator
 

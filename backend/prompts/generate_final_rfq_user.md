@@ -29,7 +29,11 @@ SECTIONS:
 9. EVALUATION CRITERIA: Weightage for Technical, Commercial, and Quality scorecards.
 10. REVISION HISTORY: Change log table for the document.
 
-STRICT RULES:
+CRITICAL RULES:
+- DO NOT include "TABLE OF CONTENTS" as a heading - it is auto-generated.
 - ALWAYS use standard Markdown (# and ##). 
-- Insert technically relevant images using [[IMAGE_ID:n]] exactly on their own line.
+- Insert images using [[IMAGE_ID:n]] IMMEDIATELY AFTER the relevant section heading.
+  Example: Place brake assembly diagram right after "## TECHNICAL SPECIFICATIONS"
+- Place each [[IMAGE_ID:n]] tag on its own line.
 - NO plain text headers without # symbols.
+

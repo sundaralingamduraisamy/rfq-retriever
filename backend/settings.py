@@ -27,6 +27,10 @@ class Settings(BaseSettings):
     # Embedding Configuration
     EMBEDDING_MODEL_NAME: str
     
+    # Image Model Configuration
+    IMAGE_MODEL_NAME: str
+    IMAGE_MODEL_FALLBACK: str
+    
     # Retriever Configuration
     RETRIEVER_TOP_K: int
 

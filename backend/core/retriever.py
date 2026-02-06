@@ -61,7 +61,7 @@ def hybrid_search(query: str):
                 "relevance": round(similarity * 100, 2)
             })
 
-        print(f"✅ Search found {len(formatted_results)} results in {(time.time() - start_time)*1000:.1f}ms")
+        # print(f"✅ Search found {len(formatted_results)} results in {(time.time() - start_time)*1000:.1f}ms")
         return formatted_results
 
     except Exception as e:
@@ -154,7 +154,7 @@ def search_images(query: str, top_k: int = 3):
         formatted = []
         for r in results:
             similarity = float(r[3])
-            print(f"DEBUG: Retrieved Image ID {r[0]} | Similarity: {similarity:.4f} | Desc: {r[1]}")
+            # print(f"DEBUG: Retrieved Image ID {r[0]} | Similarity: {similarity:.4f} | Desc: {r[1]}")
             
             if similarity < 0.05: continue # Lowered Threshold
             

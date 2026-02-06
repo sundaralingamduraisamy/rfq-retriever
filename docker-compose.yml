@@ -5,8 +5,8 @@ services:
       - "5432:5432"
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: rfq_agent
+      POSTGRES_PASSWORD: rahul5757
+      POSTGRES_DB: documents_db
     volumes:
       - pgdata:/var/lib/postgresql/data
 

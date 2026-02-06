@@ -38,7 +38,7 @@ class ChatAgent:
 
     def _search_documents(self, query: str):
         """Search indexed documents using vector similarity"""
-        print(f"\n   🔧 Tool: search_documents('{query}')")
+        # print(f"\n   🔧 Tool: search_documents('{query}')")
         results = hybrid_search(query)
 
         if not results:
@@ -66,7 +66,7 @@ class ChatAgent:
 
     def _search_images(self, query: str):
         """Search for relevant past automotive images using vector similarity"""
-        print(f"\n   🔧 Tool: search_images('{query}')")
+        # print(f"\n   🔧 Tool: search_images('{query}')")
         images = search_images(query)
         
         # SLICE TO MAXIMUM OF 3 IMAGES
@@ -110,7 +110,7 @@ class ChatAgent:
         Update the current RFQ draft based on specific user instructions.
         Uses the 'current_draft_context' stored in the agent.
         """
-        print(f"\n   🔧 Tool: update_rfq_draft('{instructions}')")
+        # print(f"\n   🔧 Tool: update_rfq_draft('{instructions}')")
         
         if self.current_draft_context is None:
             return "Error: No active draft found. Ask the user to start a draft first or provide content.", []
@@ -124,7 +124,7 @@ class ChatAgent:
                 image_id = d.get("image_id")
                 
                 if image_id:
-                    context_parts.append(f"IMAGE AVAILABLE: [[IMAGE_ID:{image_id}]] - Description: {d.get('description', '')}")
+                    context_parts.append(f"CRITICAL - ATTACHED IMAGE: [[IMAGE_ID:{image_id}]] - Description: {d.get('description', '')}")
                 elif text:
                     context_parts.append(f"SOURCE: {filename}\n{text}")
             
@@ -151,21 +151,25 @@ class ChatAgent:
             # Extract all valid image IDs from the context provided to the sub-agent
             valid_ids = [str(d.get("image_id")) for d in context_docs if d.get("image_id")]
             
-            # Find all tags the agent actually wrote
-            matches = re.findall(r"\[\[IMAGE_ID:(\d+)\]\]", updated_text)
+            # Find all tags the agent wrote (including hallucinations like [[IMAGE_ID:cylinder-head.jpg]])
+            # We use [^\]]+ to catch anything that is not a closing bracket
+            matches = re.findall(r"\[\[IMAGE_ID:([^\]]+)\]\]", updated_text)
             
             if not valid_ids:
                 # Scenario A: No images are available at all.
                 # If the agent hallucinated a tag, we MUST remove it to avoid 404s.
                 for mid in matches:
-                    print(f"⚠️ Hallucination Guard: Removing hallucinated Image ID {mid} (No images available)")
+                    print(f"⚠️ Hallucination Guard: Removing hallucinated tag/ID '{mid}' (No images available)")
                     updated_text = updated_text.replace(f"[[IMAGE_ID:{mid}]]", "")
             else:
                 # Scenario B: Images exist, but agent might have used a wrong/made-up ID.
+                # We map ANY invalid or non-numeric ID to the first available valid numeric ID.
                 for mid in matches:
                     if mid not in valid_ids:
-                        print(f"⚠️ Hallucination Guard: Correcting Image ID {mid} -> {valid_ids[0]}")
+                        print(f"⚠️ Hallucination Guard: Correcting/Removing invalid tag/ID '{mid}' -> {valid_ids[0]}")
                         updated_text = updated_text.replace(f"[[IMAGE_ID:{mid}]]", f"[[IMAGE_ID:{valid_ids[0]}]]")
+                    else:
+                        print(f"✅ Hallucination Guard: Image ID {mid} is valid.")
             
             # 2. Analyze Impact
             analysis_prompt = load_prompt("analyze_changes_user.md", 
@@ -336,7 +340,7 @@ class ChatAgent:
                 "type": "function",
                 "function": {
                     "name": "update_rfq_draft",
-                    "description": "Update/Edit the current RFQ draft text based on instructions. Use this when the user asks to change, add, or remove content in the draft.",
+                    "description": "CRITICAL: ONLY use this tool if you have high-quality technical specs. DO NOT use for generic drafts or nonsense inputs unless the user explicitly said 'Proceed with generic'.",
                     "parameters": {
                         "type": "object",
                         "properties": {
@@ -355,25 +359,7 @@ class ChatAgent:
         found_documents = []
         
         # System prompt
-        base_prompt = """You are a Senior Automotive RFQ Specialist. 
-Follow this Autonomous Workflow for ANY component mentioned:
-
-1. AUTO-RESEARCH: Call `search_documents` and `search_images`.
-2. AUTO-DRAFT: Use `update_rfq_draft` to create a HIGH-DETAIL 11-SECTION RFQ immediately.
-3. DATA INTEGRATION: Use 100% of technical specs (ISO/SAE/IATF) from search.
-4. IMAGE PRECISION: Insert ONLY real [[IMAGE_ID:n]] tags found. Never guest IDs.
-
-STRUCTURE:
-# [Component] RFQ Spec
-## 1. Request for Quotation
-## 2. Overview
-## 3. Technical Specifications (Include ISO/SAE Standards)
-## 4. Performance Requirements
-## 5. Quality Requirements
-## 10. Technical Diagrams (Insert real [[IMAGE_ID:n]] here)
-## 11. Revision History
-
-Output the final draft immediately in the professional editor."""
+        base_prompt = load_prompt("chat_system_prompt.md")
    
         context_messages.append(SystemMessage(content=base_prompt))
         
@@ -409,7 +395,7 @@ Output the final draft immediately in the professional editor."""
 
                 # Handle Tool Calls
                 if tool_calls:
-                    print(f"🛠️ Tool Call Detected (Iter {iteration}): {tool_calls}")
+                    # print(f"🛠️ Tool Call Detected (Iter {iteration}): {tool_calls}")
                     
                     # Ensure tool_calls is on the message for history
                     response.tool_calls = tool_calls
@@ -451,7 +437,7 @@ Output the final draft immediately in the professional editor."""
                 
                 # No tool call -> Final Response
                 response_text = response.content
-                print(f"✅ Final Response. Found docs: {len(found_documents)}")
+                # print(f"✅ Final Response. Found docs: {len(found_documents)}")
                 return response_text, found_documents, self.pending_update
                 
             except Exception as e:
@@ -463,7 +449,7 @@ Output the final draft immediately in the professional editor."""
                 rescued_calls = self._rescue_tool_calls(err_str, iteration)
                 
                 if rescued_calls:
-                    print(f"🩹 Rescued {len(rescued_calls)} calls from error message!")
+                    # print(f"🩹 Rescued {len(rescued_calls)} calls from error message!")
                     # Synthesize an AI message with tool calls
                     rescue_msg = AIMessage(content="Attempting rescued tool call...", tool_calls=rescued_calls)
                     context_messages.append(rescue_msg)

@@ -19,14 +19,22 @@ def get_model():
 
     # Attempt 1: JinaCLIP
     try:
-        print("🚀 Attempting to load JinaCLIP (jinaai/jina-clip-v1)...")
+        import warnings
+        import os
+        
+        # Suppress warnings
+        warnings.filterwarnings("ignore", category=UserWarning)
+        warnings.filterwarnings("ignore", category=FutureWarning)
+        os.environ["TRANSFORMERS_VERBOSITY"] = "error"
+        
+        # print("🚀 Attempting to load JinaCLIP (jinaai/jina-clip-v1)...")
         from transformers import AutoModel, AutoProcessor
         # Forcing use_safetensors=True to bypass pickle security checks in newer torch
-        _active_model = AutoModel.from_pretrained("jinaai/jina-clip-v1", trust_remote_code=True, use_safetensors=True, token=settings.HUGGINGFACE_TOKEN)
+        _active_model = AutoModel.from_pretrained(settings.IMAGE_MODEL_NAME, trust_remote_code=True, use_safetensors=True, token=settings.HUGGINGFACE_TOKEN)
         _active_model = _active_model.float() # Force float32 for CPU compatibility
-        _active_processor = AutoProcessor.from_pretrained("jinaai/jina-clip-v1", trust_remote_code=True, token=settings.HUGGINGFACE_TOKEN)
+        _active_processor = AutoProcessor.from_pretrained(settings.IMAGE_MODEL_NAME, trust_remote_code=True, token=settings.HUGGINGFACE_TOKEN)
         _model_type = "jina"
-        print("✅ JinaCLIP loaded successfully.")
+        print(f"✅ {settings.IMAGE_MODEL_NAME} loaded successfully.")
         return _active_model, _active_processor, _model_type
     except Exception as e:
         print(f"⚠️ JinaCLIP load failed: {e}. Falling back to standard CLIP...")
@@ -34,12 +42,12 @@ def get_model():
     # Attempt 2: Standard CLIP (More likely to be cached or smaller)
     try:
         from transformers import CLIPModel, CLIPProcessor
-        print("🚀 Loading fallback CLIP (openai/clip-vit-base-patch32)...")
+        # print("🚀 Loading fallback CLIP (openai/clip-vit-base-patch32)...")
         # Forcing use_safetensors=True to bypass pickle security checks
-        _active_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32", use_safetensors=True)
-        _active_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
+        _active_model = CLIPModel.from_pretrained(settings.IMAGE_MODEL_FALLBACK, use_safetensors=True)
+        _active_processor = CLIPProcessor.from_pretrained(settings.IMAGE_MODEL_FALLBACK)
         _model_type = "clip"
-        print("✅ Fallback CLIP loaded successfully.")
+        print(f"✅ Fallback {settings.IMAGE_MODEL_FALLBACK} loaded successfully.")
         return _active_model, _active_processor, _model_type
     except Exception as e:
         print(f"❌ All CLIP models failed to load: {e}")
@@ -101,11 +109,11 @@ class ImageProcessor:
         
         if file_ext == 'pdf':
             doc = fitz.open(stream=file_content, filetype="pdf")
-            print(f"DEBUG: Processing PDF with {len(doc)} pages")
+            # print(f"DEBUG: Processing PDF with {len(doc)} pages")
             for page_index in range(len(doc)):
                 page = doc[page_index]
                 image_list = page.get_images(full=True)
-                print(f"DEBUG: Page {page_index+1} found {len(image_list)} images")
+                # print(f"DEBUG: Page {page_index+1} found {len(image_list)} images")
                 for img_index, img in enumerate(image_list):
                     xref = img[0]
                     base_image = doc.extract_image(xref)
@@ -118,7 +126,7 @@ class ImageProcessor:
         elif file_ext == 'docx':
             import docx
             doc = docx.Document(io.BytesIO(file_content))
-            print("DEBUG: Processing DOCX")
+            # print("DEBUG: Processing DOCX")
             for rel in doc.part.rels.values():
                 if "image" in rel.target_ref:
                     image_bytes = rel.target_part.blob
@@ -128,7 +136,7 @@ class ImageProcessor:
                         "format": "docx-img"
                     })
 
-        print(f"DEBUG: Total raw images extracted: {len(all_images)}")
+        # print(f"DEBUG: Total raw images extracted: {len(all_images)}")
         results = []
         for i, img in enumerate(all_images):
             try:
@@ -137,8 +145,15 @@ class ImageProcessor:
                     pil_img = pil_img.convert('RGB')
 
                 is_related, label, conf = self.is_automobile_related(pil_img)
-                print(f"DEBUG: Image {i+1} -> Label: {label}, Confidence: {conf:.4f}, Approved: {is_related}")
+                # print(f"DEBUG: Image {i+1} -> Label: {label}, Confidence: {conf:.4f}, Approved: {is_related}")
                 
+                # Determine MIME type based on format
+                fmt = img["format"].lower()
+                mime = "image/png" # Default
+                if fmt in ["jpg", "jpeg"]: mime = "image/jpeg"
+                elif fmt == "gif": mime = "image/gif"
+                elif fmt == "webp": mime = "image/webp"
+
                 res = {
                     "data": img["data"],
                     "description": label,
@@ -147,6 +162,7 @@ class ImageProcessor:
                     "metadata": {
                         "page": img["page"],
                         "format": img["format"],
+                        "mime_type": mime,
                         "size": pil_img.size
                     }
                 }
@@ -179,7 +195,7 @@ class ImageProcessor:
             if row:
                 image_id = row[0]
                 # 2. Insert Embedding
-                print(f"   [DEBUG] Saving embedding for Image ID {image_id} (Vector Dim: {len(img['embedding'])})")
+                # print(f"   [DEBUG] Saving embedding for Image ID {image_id} (Vector Dim: {len(img['embedding'])})")
                 success = db.execute_update(
                     """
                     INSERT INTO image_embeddings (image_id, embedding)

@@ -118,10 +118,20 @@ export default function GenerateRFQ() {
     const lines = text.split('\n');
     const transformedLines = lines.map(line => {
       const trimmed = line.trim();
+
+      // SKIP: If already a markdown header, skip
+      if (trimmed.startsWith('#')) return line;
+
+      // SKIP: If it's the TOC section specifically
+      if (/^1\.\s+TABLE OF CONTENTS/i.test(trimmed)) return line;
+
       // Match "1. Title" or "1.1 Title" or "Section 1: Title"
-      if (/^(\d+\.|\d+\.\d+|Section\s+\d+:)/i.test(trimmed) && trimmed.length < 100) {
-        // Force it to be a Markdown H2 if it's not already a header
-        if (!trimmed.startsWith('#')) {
+      // Added check: Only transform if it's longer than 15 chars (likely a section title, not a TOC item)
+      // OR if it's the start of a main section (1., 2., etc.)
+      const isHeaderLike = /^(\d+\.|\d+\.\d+|Section\s+\d+:)/i.test(trimmed);
+      if (isHeaderLike && trimmed.length < 100) {
+        // If it's a main section (e.g. "1. Introduction") and it's substantial, or looks like a title
+        if (trimmed.length > 20 || /^[A-Z]/.test(trimmed.split('. ')[1] || "")) {
           return `## ${trimmed}`;
         }
       }
@@ -466,6 +476,14 @@ export default function GenerateRFQ() {
                                   <img
                                     {...props}
                                     className="max-h-[600px] w-full object-contain rounded-2xl shadow-2xl border border-slate-200"
+                                    onError={(e) => {
+                                      console.error("❌ Image failed to load:", props.src);
+                                      e.currentTarget.style.display = 'none';
+                                      const fallback = document.createElement('div');
+                                      fallback.className = "p-4 border-2 border-dashed border-red-200 rounded-xl bg-red-50 text-red-500 text-xs text-center";
+                                      fallback.innerText = `Image Failed to Load (ID: ${props.src?.split('/').pop()})`;
+                                      e.currentTarget.parentElement?.appendChild(fallback);
+                                    }}
                                   />
                                   <span className="mt-4 text-[11px] uppercase tracking-[0.2em] text-slate-500 font-black bg-slate-100 px-4 py-2 rounded-full border border-slate-200 shadow-sm">
                                     {props.alt || "Vision Component Illustration"}

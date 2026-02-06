@@ -227,11 +227,15 @@ def render_pdf(rfq: dict, no: int) -> bytes:
             # --- Header Detection ---
             if line.startswith('### '):
                 story.append(Paragraph(line[4:], styles["Heading3"]))
-            elif line.startswith('## ') or re.match(r'^(Section\s+\d+:|\d+\.|\d+\d+)', line):
+            elif line.startswith('## ') or re.match(r'^(Section\s+\d+:|(?:\d+\.)+\d*\s+)', line):
                 clean_header = re.sub(r'^##\s*', '', line).strip()
                 story.append(Paragraph(clean_header, styles["Heading2"]))
             elif line.startswith('# '):
-                story.append(Paragraph(line[2:], styles["Heading1"]))
+                header_text = line[2:].strip()
+                # Skip TABLE OF CONTENTS - it's auto-generated on page 2
+                if header_text.upper() == "TABLE OF CONTENTS":
+                    continue
+                story.append(Paragraph(header_text, styles["Heading1"]))
             
             # --- Bullet Detection ---
             elif line.startswith('- ') or line.startswith('* '):
@@ -292,7 +296,13 @@ def render_docx(rfq: dict, no: int) -> bytes:
     doc.add_page_break()
 
     doc.add_heading(rfq_id, level=1)
+    
+    import re
     for line in clean_lines(rfq["body"]):
+        # Skip TABLE OF CONTENTS - it's auto-generated
+        if line.strip().upper() == "TABLE OF CONTENTS" or line.strip().upper() == "# TABLE OF CONTENTS":
+            continue
+            
         if line.isupper() and len(line) < 60:
             doc.add_heading(line, level=2)
         elif "[IMAGE_ID:" in line:

@@ -28,10 +28,13 @@ class EmbeddingIndexer:
             # Use full text (relying on model context window)
             messages = [
                 SystemMessage(
-                    content="You are a technical document summarizer. Summarize focusing on: 1) Main services/products, 2) Key requirements, 3) Important constraints, 4) Timeline/pricing. Keep concise and structured."
+                    content="You are a professional technical automotive specialist. Your task is to provide a HIGH-DETAIL, EXHAUSTIVE summary of the document. "
+                            "Focus on: 1) Every specific technical parameter, 2) All mentioned ISO/SAE/IATF standards, 3) Detailed manufacturing/material requirements, "
+                            "4) Complex constraints and 5) Precise timeline/commercial terms. "
+                            "Maintain a dense, technical tone. DO NOT be concise; provide as much detail as possible for RAG purposes."
                 ),
                 HumanMessage(
-                    content=f"Summarize this RFQ document:\n\n{text}"
+                    content=f"Provide an exhaustive technical summary of this RFQ document:\n\n{text}"
                 )
             ]
 
