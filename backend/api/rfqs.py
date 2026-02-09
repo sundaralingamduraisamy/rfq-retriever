@@ -35,12 +35,12 @@ def update_rfq_status(rfq_id: int, data: UpdateStatusModel):
     if not db:
         raise HTTPException(500, "Database connection failed")
         
-    success = db.execute_update(
+    rows_affected = db.execute_update(
         "UPDATE generated_rfqs SET status = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s",
         (data.status, rfq_id)
     )
     
-    if not success:
+    if rows_affected <= 0:
         raise HTTPException(404, "RFQ not found")
         
     return {"status": "updated", "id": rfq_id, "new_status": data.status}
@@ -48,13 +48,16 @@ def update_rfq_status(rfq_id: int, data: UpdateStatusModel):
 @router.post("/rfqs/save")
 def save_rfq(data: SaveRFQModel):
     """Save or Update RFQ in DB"""
+    print(f"📥 Received save request: id={data.id}, title={data.title}")
     if not db:
+        print("❌ Database connection failed during save")
         raise HTTPException(500, "Database connection failed")
 
     try:
         if data.id:
             # Update existing
-            success = db.execute_update(
+            print(f"📝 Updating existing RFQ {data.id}")
+            rows_affected = db.execute_update(
                 """
                 UPDATE generated_rfqs 
                 SET filename = %s, content = %s, status = %s, updated_at = CURRENT_TIMESTAMP 
@@ -62,25 +65,32 @@ def save_rfq(data: SaveRFQModel):
                 """,
                 (data.title, data.content, data.status, data.id)
             )
-            if not success:
-                 raise HTTPException(404, "RFQ ID not found for update")
-            return {"status": "updated", "id": data.id, "title": data.title}
-        else:
-            # Insert new
-            row = db.execute_insert_returning(
-                """
-                INSERT INTO generated_rfqs (filename, content, status) 
-                VALUES (%s, %s, %s) 
-                RETURNING id
-                """,
-                (data.title, data.content, data.status)
-            )
-            if not row:
-                raise HTTPException(500, "Failed to insert RFQ")
-            return {"status": "created", "id": row[0], "title": data.title}
+            
+            if rows_affected > 0:
+                print(f"✅ RFQ {data.id} updated successfully")
+                return {"status": "updated", "id": data.id, "title": data.title}
+            else:
+                print(f"⚠️ RFQ ID {data.id} not found in DB. Falling back to INSERT.")
+                # Fall through to insert new if update failed because ID doesn't exist
+        
+        # Insert new
+        print(f"🆕 Creating new RFQ: {data.title}")
+        row = db.execute_insert_returning(
+            """
+            INSERT INTO generated_rfqs (filename, content, status) 
+            VALUES (%s, %s, %s) 
+            RETURNING id
+            """,
+            (data.title, data.content, data.status)
+        )
+        if not row:
+            print("❌ Failed to insert RFQ into database")
+            raise HTTPException(500, "Failed to insert RFQ")
+        print(f"✅ New RFQ created with ID: {row[0]}")
+        return {"status": "created", "id": row[0], "title": data.title}
 
     except Exception as e:
-        print(f"Save error: {e}")
+        print(f"❌ Save error: {e}")
         raise HTTPException(500, f"Save failed: {str(e)}")
 
 

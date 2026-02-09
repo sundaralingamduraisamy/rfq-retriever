@@ -15,6 +15,7 @@ import {
   CheckCircle2,
   XCircle,
   AlertCircle,
+  RefreshCw,
   Image as ImageIcon
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -22,6 +23,7 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { DocumentPreviewDialog } from '@/components/common/DocumentPreviewDialog';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { Progress } from '@/components/ui/progress';
 import {
   Select,
   SelectContent,
@@ -94,6 +96,8 @@ export default function DocumentLibrary() {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('list');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadingFileName, setUploadingFileName] = useState('');
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [docToDelete, setDocToDelete] = useState<Document | null>(null);
   const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
@@ -146,24 +150,63 @@ export default function DocumentLibrary() {
 
     try {
       setUploading(true);
+      setUploadProgress(0);
+      setUploadingFileName(pendingFile.name);
       setCategoryDialogOpen(false);
 
-      // Create FormData with file and category
       const formData = new FormData();
       formData.append('file', pendingFile);
       formData.append('category', category);
 
-      const response = await fetch(`${API_BASE_URL}/upload`, {
-        method: 'POST',
-        body: formData,
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${API_BASE_URL}/upload`);
+
+      let interval: any;
+
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) {
+          // Phase 1: Uploading (Cap at 90%)
+          const percentComplete = Math.round((event.loaded / event.total) * 90);
+          setUploadProgress(percentComplete);
+
+          if (percentComplete >= 90) {
+            // Once upload is basically done, start a slow simulation for processing (Phase 2)
+            if (!interval) {
+              setUploadingFileName(prev => `${prev} (Indexing...)`);
+              interval = setInterval(() => {
+                setUploadProgress(prev => {
+                  if (prev < 98) return prev + 1;
+                  return prev;
+                });
+              }, 800);
+            }
+          }
+        }
+      };
+
+      const resultPromise = new Promise((resolve, reject) => {
+        xhr.onload = () => {
+          if (interval) clearInterval(interval);
+          if (xhr.status >= 200 && xhr.status < 300) {
+            setUploadProgress(100);
+            resolve(JSON.parse(xhr.responseText));
+          } else {
+            try {
+              const errorData = JSON.parse(xhr.responseText);
+              reject(new Error(errorData.detail || 'Upload failed'));
+            } catch (e) {
+              reject(new Error('Upload failed'));
+            }
+          }
+        };
+        xhr.onerror = () => {
+          if (interval) clearInterval(interval);
+          reject(new Error('Network error during upload'));
+        };
       });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Upload failed');
-      }
-
-      const result = await response.json();
+      xhr.send(formData);
+      const result: any = await resultPromise;
       const stats = result.image_stats;
 
       // Show success toast with color indicators
@@ -197,6 +240,8 @@ export default function DocumentLibrary() {
       alert("Upload failed: " + (error as any).message);
     } finally {
       setUploading(false);
+      setUploadProgress(0);
+      setUploadingFileName('');
       // Reset input
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
@@ -242,7 +287,7 @@ export default function DocumentLibrary() {
     if (!docToDelete) return;
 
     try {
-      await deleteDocument(docToDelete.name);
+      await deleteDocument(docToDelete.id);
       await fetchDocuments();
     } catch (error) { // eslint-disable-next-line
       alert("Delete failed: " + (error as any).message);
@@ -374,6 +419,39 @@ export default function DocumentLibrary() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
+                    {uploading && (
+                      <TableRow className="bg-primary/5 animate-pulse">
+                        <TableCell className="pl-6 py-4">
+                          <div className="flex items-center gap-3">
+                            <div className="p-2 rounded-lg bg-primary/10 border border-primary/20">
+                              <RefreshCw className="w-4 h-4 text-primary animate-spin" />
+                            </div>
+                            <div className="flex flex-col gap-1 flex-1 min-w-[200px]">
+                              <span className="font-medium text-primary flex items-center gap-2">
+                                {uploadingFileName}
+                                <span className="text-[10px] bg-primary/10 px-1.5 py-0.5 rounded text-primary uppercase font-bold tracking-wider">Uploading...</span>
+                              </span>
+                              <div className="flex items-center gap-3">
+                                <Progress value={uploadProgress} className="h-1.5 flex-1" />
+                                <span className="text-[10px] font-mono font-bold text-primary w-8">{uploadProgress}%</span>
+                              </div>
+                            </div>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <span className="inline-flex items-center px-2 py-1 rounded-md bg-slate-100 text-slate-400 text-xs font-medium border border-slate-200 uppercase tracking-tighter italic">
+                            {category}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-slate-400 text-sm font-mono italic">
+                          - KB
+                        </TableCell>
+                        <TableCell className="text-slate-400 text-sm italic">
+                          Just now
+                        </TableCell>
+                        <TableCell></TableCell>
+                      </TableRow>
+                    )}
                     {filteredDocs.map((doc, index) => {
                       const Icon = fileIcons[doc.type] || fileIcons.unknown;
                       return (
@@ -446,6 +524,25 @@ export default function DocumentLibrary() {
               </div>
             ) : (
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                {uploading && (
+                  <div className="group relative rounded-xl bg-primary/5 border border-primary/20 p-5 shadow-soft-sm animate-pulse">
+                    <div className="flex items-start justify-between mb-4">
+                      <div className="p-3 rounded-lg bg-primary/10 border border-primary/20">
+                        <RefreshCw className="w-6 h-6 text-primary animate-spin" />
+                      </div>
+                    </div>
+                    <p className="font-semibold text-sm text-primary truncate mb-2">
+                      {uploadingFileName}
+                    </p>
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-[10px] font-bold text-primary uppercase tracking-wider">
+                        <span>Uploading</span>
+                        <span>{uploadProgress}%</span>
+                      </div>
+                      <Progress value={uploadProgress} className="h-1.5" />
+                    </div>
+                  </div>
+                )}
                 {filteredDocs.map((doc, index) => {
                   const Icon = fileIcons[doc.type] || fileIcons.unknown;
                   return (
@@ -517,20 +614,46 @@ export default function DocumentLibrary() {
         )}
 
         {/* Empty State */}
-        {!loading && filteredDocs.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-16 text-center">
-            <div className="w-16 h-16 rounded-2xl bg-muted/50 flex items-center justify-center mb-4">
-              <FolderOpen className="w-8 h-8 text-muted-foreground" />
+        {!loading && filteredDocs.length === 0 && !uploading && (
+          <div className="flex flex-col items-center justify-center py-16 text-center animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <div className="w-16 h-16 rounded-2xl bg-slate-50 border border-slate-100 flex items-center justify-center mb-4 shadow-soft-sm">
+              <FolderOpen className="w-8 h-8 text-slate-400" />
             </div>
-            <h3 className="text-lg font-semibold mb-2">No documents found</h3>
-            <p className="text-sm text-muted-foreground max-w-sm mb-6">
+            <h3 className="text-lg font-semibold text-slate-800 mb-2">No documents found</h3>
+            <p className="text-sm text-slate-500 max-w-sm mb-6 leading-relaxed">
               Try adjusting your search or filters, or upload new documents to
               your knowledge base.
             </p>
-            <Button onClick={handleUploadClick} disabled={uploading}>
+            <Button onClick={handleUploadClick} variant="outline" className="shadow-sm border-slate-200">
               <Upload className="w-4 h-4 mr-2" />
               Upload Document
             </Button>
+          </div>
+        )}
+
+        {/* Uploading State for Empty Library */}
+        {!loading && filteredDocs.length === 0 && uploading && (
+          <div className="flex flex-col items-center justify-center py-24 text-center animate-in fade-in duration-500">
+            <div className="w-20 h-20 rounded-3xl bg-primary/10 border-2 border-primary/20 flex items-center justify-center mb-8 relative shadow-lg shadow-primary/5">
+              <RefreshCw className="w-10 h-10 text-primary animate-spin" />
+              <div className="absolute -bottom-2 -right-2 bg-primary text-white text-[10px] font-black px-2 py-1 rounded-full shadow-md uppercase tracking-tighter">
+                {uploadProgress}%
+              </div>
+            </div>
+            <h3 className="text-2xl font-black text-slate-900 mb-2 tracking-tight">Uploading Document...</h3>
+            <p className="text-slate-500 text-sm mb-8 font-medium">
+              Processing <span className="text-primary font-bold">{uploadingFileName}</span> and analyzing technical content.
+            </p>
+            <div className="w-full max-w-md space-y-3 bg-white p-6 rounded-2xl border border-slate-100 shadow-soft-lg">
+              <div className="flex justify-between text-xs font-bold uppercase text-slate-400 tracking-widest">
+                <span>Upload Status</span>
+                <span className="text-primary">{uploadProgress}% Complete</span>
+              </div>
+              <Progress value={uploadProgress} className="h-3 shadow-inner" />
+              <p className="text-[11px] text-slate-400 font-medium italic">
+                Please don't close this tab while your document is being indexed.
+              </p>
+            </div>
           </div>
         )}
       </div>

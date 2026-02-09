@@ -1,7 +1,8 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Download, ExternalLink } from "lucide-react";
+import { Download } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { RFQMarkdown } from "./RFQMarkdown";
 
 interface DocumentPreviewDialogProps {
     open: boolean;
@@ -48,10 +49,8 @@ export function DocumentPreviewDialog({
                         />
                     ) : type === 'text' && textContent ? (
                         <ScrollArea className="h-full">
-                            <div className="p-8 max-w-3xl mx-auto bg-white min-h-full shadow-sm my-4 rounded-md">
-                                <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed text-foreground">
-                                    {textContent}
-                                </pre>
+                            <div className="p-8 max-w-4xl mx-auto bg-white min-h-full shadow-lg my-4 rounded-xl border border-slate-100">
+                                <RFQMarkdown content={textContent} />
                             </div>
                         </ScrollArea>
                     ) : (

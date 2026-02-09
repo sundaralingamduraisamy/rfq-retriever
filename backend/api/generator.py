@@ -2,7 +2,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from core.llm_agent import chat_with_llm, agent
 from core.prompt_loader import load_prompt
-from core.retriever import hybrid_search, get_full_rfq
+from core.prompt_loader import load_prompt
+from core.retriever import hybrid_search, get_full_rfq, search_images
 from core.text_utils import clean_rfq_text
 
 router = APIRouter()
@@ -106,6 +107,21 @@ def search_rfq(data: SearchModel):
     # Use PgVector Hybrid Search
     results = hybrid_search(data.query)
     
+    # Deduplicate by filename, keeping highest relevance score
+    seen_files = {}
+    for r in results:
+        filename = r["source"]["file"]
+        relevance = r["relevance"]
+        
+        if filename not in seen_files or relevance > seen_files[filename]["relevance"]:
+            seen_files[filename] = r
+    
+    # Convert back to list and sort by relevance
+    results = sorted(seen_files.values(), key=lambda x: x["relevance"], reverse=True)
+    
+    # Limit to top 5 results
+    results = results[:5]
+    
     return {
         "results": [
             {"file": r["source"]["file"], "score": r["relevance"]}
@@ -116,8 +132,21 @@ def search_rfq(data: SearchModel):
 @router.post("/generate_final_rfq")
 def generate_final_rfq(data: FinalRFQModel):
     # Keep existing logic
+    # 1. Search for relevant images
+    images = search_images(data.requirement, top_k=3)
+    
+    image_context = ""
+    if images:
+        image_context = "\n\nAVAILABLE IMAGES (Use [[IMAGE_ID:n]] to insert):"
+        for img in images:
+            image_context += f"\n- Image ID: {img['id']}\n  Description: {img['description']}\n  Filename: {img['file']}"
+        
+        # Append instruction to prompt
+        image_context += "\n\nIMPORTANT: You MUST insert the above images into the RFQ where relevant using the [[IMAGE_ID:id]] syntax."
+
+    # 2. Load Prompt with Image Context
     prompt = load_prompt("generate_final_rfq_user.md", 
-                         requirement=data.requirement, 
+                         requirement=data.requirement + image_context, 
                          filled_data=data.filled_data, 
                          reference_file=data.reference_file)
     

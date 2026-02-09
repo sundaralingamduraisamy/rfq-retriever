@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import {
   Search,
-  Plus,
   MoreVertical,
   Trash2,
   Edit2,
@@ -149,12 +148,6 @@ export default function MyRFQs() {
               Manage, track, and edit your generated RFQs.
             </p>
           </div>
-          <Link to="/generate">
-            <Button className="gap-2">
-              <Plus className="w-4 h-4" />
-              Generate New RFQ
-            </Button>
-          </Link>
         </div>
 
         {/* Filters */}

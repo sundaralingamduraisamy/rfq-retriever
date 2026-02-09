@@ -73,8 +73,8 @@ export async function uploadDocument(file) {
   return res.json();
 }
 
-export async function deleteDocument(filename) {
-  const res = await fetch(`${BASE}/documents/${filename}`, {
+export async function deleteDocument(docId) {
+  const res = await fetch(`${BASE}/documents/${docId}`, {
     method: "DELETE",
   });
   if (!res.ok) throw new Error("Delete failed");

@@ -44,22 +44,41 @@ class ChatAgent:
         if not results:
             return "No matching documents found.", []
 
+        # Deduplicate by filename, keeping highest relevance score
+        seen_files = {}
+        for item in results:
+            filename = item["source"]["file"]
+            relevance = item["relevance"]
+            
+            if filename not in seen_files or relevance > seen_files[filename]["relevance"]:
+                seen_files[filename] = item
+        
+        # Convert back to list and sort by relevance
+        results = sorted(seen_files.values(), key=lambda x: x["relevance"], reverse=True)
+        
+        # Limit to top 3 results to reduce tokens
+        results = results[:3]
+
         summary = f"Found {len(results)} relevant documents:\n\n"
         found_docs = []
         
         for i, item in enumerate(results, 1):
             src = item["source"]
-            preview = item["text"][:200].replace("\n", " ")
+            # Truncate text to reduce token usage
+            full_text = item["text"]
+            truncated_text = full_text[:500] + "..." if len(full_text) > 500 else full_text
+            preview = truncated_text[:200].replace("\n", " ")
+            
             summary += f"{i}. [{src['file']}] (Relevance: {item['relevance']}%)\n"
             summary += f"   Preview: {preview}...\n"
-            summary += f"   Full Summary: {item['text']}\n\n"
+            summary += f"   Summary: {truncated_text}\n\n"
             
             # Add to found list
             found_docs.append({
                 "file": src["file"],
                 "score": item["relevance"],
                 "preview": preview,
-                "full_text": item["text"]
+                "full_text": truncated_text  # Truncated to save tokens
             })
 
         return summary, found_docs
@@ -87,6 +106,7 @@ class ChatAgent:
                 "text": f"IMAGE INFO: [ID: {img['id']}] Description: {img['description']}"
             })
             
+        summary += "\nCRITICAL: If these images are relevant, you MUST include them using [[IMAGE_ID:n]] in Section 1 or 2 of the RFQ draft."
         return summary, found_imgs
 
     def _get_full_summary(self, filename: str):
@@ -101,7 +121,10 @@ class ChatAgent:
             (filename,)
         )
         if row:
-            return f"Complete summary for {filename}:\n{row[0]}", [{"file": filename, "score": 100, "preview": "Full Document Accessed", "full_text": row[0]}]
+            full_summary = row[0]
+            # Truncate to 800 chars to avoid token limits
+            truncated = full_summary[:800] + "..." if len(full_summary) > 800 else full_summary
+            return f"Summary for {filename}:\n{truncated}", [{"file": filename, "score": 100, "preview": "Full Document Accessed", "full_text": truncated}]
         return "Summary not found.", []
 
     def _update_rfq_draft(self, instructions: str, context_docs: List[Dict] = []):
@@ -117,8 +140,19 @@ class ChatAgent:
 
         try:
             # 1. Apply Edit
-            context_parts = []
+            # Deduplicate context documents and images before sending to LLM
+            unique_context = []
+            seen_ids = set()
+            
             for d in context_docs:
+                # Use filename+chunk_id for docs, image_id for images
+                cid = d.get("image_id") or f"{d.get('file')}:{d.get('chunk_id')}"
+                if cid not in seen_ids:
+                    seen_ids.add(cid)
+                    unique_context.append(d)
+            
+            context_parts = []
+            for d in unique_context:
                 filename = d.get("file") or (d.get("source", {}).get("file")) or "Unknown Source"
                 text = d.get("full_text") or d.get("text") or d.get("preview") or ""
                 image_id = d.get("image_id")
@@ -147,7 +181,6 @@ class ChatAgent:
             updated_text = clean_text(updated_text)
             
             # --- IMAGE ID HALLUCINATION GUARD ---
-            # --- IMAGE ID HALLUCINATION GUARD ---
             # Extract all valid image IDs from the context provided to the sub-agent
             valid_ids = [str(d.get("image_id")) for d in context_docs if d.get("image_id")]
             
@@ -163,13 +196,15 @@ class ChatAgent:
                     updated_text = updated_text.replace(f"[[IMAGE_ID:{mid}]]", "")
             else:
                 # Scenario B: Images exist, but agent might have used a wrong/made-up ID.
-                # We map ANY invalid or non-numeric ID to the first available valid numeric ID.
+                # STRICT VALIDATION: Only allow numeric IDs that exist in valid_ids
                 for mid in matches:
-                    if mid not in valid_ids:
-                        print(f"⚠️ Hallucination Guard: Correcting/Removing invalid tag/ID '{mid}' -> {valid_ids[0]}")
-                        updated_text = updated_text.replace(f"[[IMAGE_ID:{mid}]]", f"[[IMAGE_ID:{valid_ids[0]}]]")
-                    else:
+                    # Check if ID is numeric and valid
+                    if mid.isdigit() and mid in valid_ids:
                         print(f"✅ Hallucination Guard: Image ID {mid} is valid.")
+                    else:
+                        # Invalid ID (non-numeric or not in valid list) - REMOVE IT
+                        print(f"⚠️ Hallucination Guard: Removing invalid/hallucinated tag/ID '{mid}' (Not a valid numeric ID)")
+                        updated_text = updated_text.replace(f"[[IMAGE_ID:{mid}]]", "")
             
             # 2. Analyze Impact
             analysis_prompt = load_prompt("analyze_changes_user.md", 
@@ -423,8 +458,19 @@ class ChatAgent:
                              # PASS COLLECTED DOCS FOR CONTEXT
                             tool_result_text, tool_docs = self._update_rfq_draft(args.get("instructions", ""), found_documents)
                         
-                        # Collect docs IMMEDIATELY so subsequent tools in this turn can see them
-                        found_documents.extend(tool_docs)
+                        # Deduplicate and extend found_documents
+                        for d in tool_docs:
+                            # Create unique key for deduplication
+                            d_id = d.get("image_id") or f"{d.get('file')}:{d.get('chunk_id')}"
+                            # Check if already in found_documents
+                            exists = False
+                            for fd in found_documents:
+                                fd_id = fd.get("image_id") or f"{fd.get('file')}:{fd.get('chunk_id')}"
+                                if d_id == fd_id:
+                                    exists = True
+                                    break
+                            if not exists:
+                                found_documents.append(d)
                         
                         # Append tool output message
                         context_messages.append(ToolMessage(
@@ -485,10 +531,10 @@ class ChatAgent:
                 # Final Fallback
                 if iteration == 0:
                      try:
-                        return llm.invoke(context_messages).content, [], None
+                        return llm.invoke(context_messages).content, found_documents, None
                      except:
                         pass
-                return f"I encountered an issue while processing tools: {err_str}", [], None
+                return f"I encountered an issue while processing tools: {err_str}", found_documents, None
         
         return "I found some information but need more specific guidance.", found_documents, self.pending_update
 

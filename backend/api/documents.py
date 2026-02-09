@@ -78,24 +78,30 @@ async def upload_document(file: UploadFile = File(...), category: str = Form("Ge
         raise HTTPException(500, f"Upload failed: {str(e)}")
 
 
-@router.delete("/documents/{filename}")
-def delete_document(filename: str):
-    """Delete document from DB (Cascades to chunks/summaries)"""
+@router.delete("/documents/{doc_id}")
+def delete_document(doc_id: int):
+    """Delete document from DB by ID (Cascades to chunks/summaries)"""
     if not db:
         raise HTTPException(500, "Database connection failed")
         
     # Check if exists
-    exists = db.execute_query_single("SELECT id FROM documents WHERE filename = %s", (filename,))
+    exists = db.execute_query_single("SELECT filename FROM documents WHERE id = %s", (doc_id,))
     if not exists:
-        raise HTTPException(404, "File not found")
+        raise HTTPException(404, "Document not found")
+    
+    filename = exists[0]
         
     # Delete (Cascade should handle children)
-    success = db.execute_update("DELETE FROM documents WHERE filename = %s", (filename,))
-    
-    if success:
-        return {"status": "deleted", "filename": filename}
-    else:
-        raise HTTPException(500, "Failed to delete document")
+    try:
+        success_count = db.execute_update("DELETE FROM documents WHERE id = %s", (doc_id,))
+        
+        if success_count > 0:
+            return {"status": "deleted", "filename": filename, "id": doc_id}
+        else:
+            raise HTTPException(500, "Failed to delete document from database")
+    except Exception as e:
+        print(f"❌ Critical error during document deletion (ID: {doc_id}): {e}")
+        raise HTTPException(500, f"Database deletion error: {str(e)}")
 
 
 @router.get("/rfq_pdf/{filename}")

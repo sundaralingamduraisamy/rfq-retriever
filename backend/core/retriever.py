@@ -156,7 +156,7 @@ def search_images(query: str, top_k: int = 3):
             similarity = float(r[3])
             # print(f"DEBUG: Retrieved Image ID {r[0]} | Similarity: {similarity:.4f} | Desc: {r[1]}")
             
-            if similarity < 0.05: continue # Lowered Threshold
+            if similarity < 0.15: continue # Increased Threshold from 0.05 to 0.15
             
             formatted.append({
                 "id": r[0],

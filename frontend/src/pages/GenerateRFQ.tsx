@@ -1,12 +1,11 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { saveRfq, getRfqDetail } from '@/api';
 import { Trash2, Edit2, Check, X, File, FileText, Download, RefreshCw, Zap, User, Bot, Save } from 'lucide-react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ChatInterface } from '@/components/generator/ChatInterface';
 import { RFQPreview } from '@/components/generator/RFQPreview';
+import { RFQMarkdown } from '@/components/common/RFQMarkdown';
 import {
   ChatMessage,
   AgentState,
@@ -101,45 +100,6 @@ export default function GenerateRFQ() {
 
   const [rawMode, setRawMode] = useState(false);
 
-  // Process draft text to replace [[IMAGE_ID:n]] and format headers/spacing
-  const processedDraftText = useMemo(() => {
-    let text = draftText || "";
-
-    // Stage 1: Replace [[IMAGE_ID:n]] in markdown targets
-    text = text.replace(/\(\[\[IMAGE_ID:(\d+)\]\]\)/g, `(${BACKEND}/images/$1)`);
-
-    // Stage 2: Replace stand-alone [[IMAGE_ID:n]] tags
-    text = text.replace(/\[\[IMAGE_ID:(\d+)\]\]/g, (match, id) => {
-      return `\n\n![VISION COMPONENT: ID ${id}](${BACKEND}/images/${id})\n\n`;
-    });
-
-    // Stage 3: Smart Heading Transformer (Detect "1. Title" or "1.1 Title")
-    // This ensures headings are bold and have gaps without the user needing to type "#"
-    const lines = text.split('\n');
-    const transformedLines = lines.map(line => {
-      const trimmed = line.trim();
-
-      // SKIP: If already a markdown header, skip
-      if (trimmed.startsWith('#')) return line;
-
-      // SKIP: If it's the TOC section specifically
-      if (/^1\.\s+TABLE OF CONTENTS/i.test(trimmed)) return line;
-
-      // Match "1. Title" or "1.1 Title" or "Section 1: Title"
-      // Added check: Only transform if it's longer than 15 chars (likely a section title, not a TOC item)
-      // OR if it's the start of a main section (1., 2., etc.)
-      const isHeaderLike = /^(\d+\.|\d+\.\d+|Section\s+\d+:)/i.test(trimmed);
-      if (isHeaderLike && trimmed.length < 100) {
-        // If it's a main section (e.g. "1. Introduction") and it's substantial, or looks like a title
-        if (trimmed.length > 20 || /^[A-Z]/.test(trimmed.split('. ')[1] || "")) {
-          return `## ${trimmed}`;
-        }
-      }
-      return line;
-    });
-
-    return transformedLines.join('\n');
-  }, [draftText]);
 
   // PERSISTENCE EFFECTS
   useEffect(() => {
@@ -175,12 +135,16 @@ export default function GenerateRFQ() {
         content: draftText,
         status: "draft"
       });
+      console.log("Save Response:", res);
       setRfqId(res.id);
       setSaveStatus("saved");
       setTimeout(() => setSaveStatus("idle"), 2000);
-    } catch (e) {
-      alert("Failed to save draft");
+      return res;
+    } catch (e: any) {
+      console.error("Save Error:", e);
+      alert("Failed to save draft: " + (e.message || "Unknown error"));
       setSaveStatus("idle");
+      throw e;
     }
   };
 
@@ -259,11 +223,16 @@ export default function GenerateRFQ() {
           role: 'assistant',
           content: data.reply,
           timestamp: new Date().toISOString(),
-          sources: data.related_documents ? data.related_documents.map((d: any) => ({
-            name: d.file || d.name,
-            relevance: d.score || d.relevanceScore,
-            type: (d.file || d.name || '').endsWith('.pdf') ? 'pdf' : 'docx'
-          })) : undefined
+          sources: data.related_documents
+            ? data.related_documents
+              .filter((d: any) => (d.score || d.relevanceScore) > 0) // Only include docs with scores
+              .slice(0, 5) // Limit to top 5
+              .map((d: any) => ({
+                name: d.file || d.name,
+                relevance: d.score || d.relevanceScore,
+                type: (d.file || d.name || '').endsWith('.pdf') ? 'pdf' : 'docx'
+              }))
+            : undefined
         });
 
         // Add Impact Analysis if present
@@ -311,6 +280,14 @@ export default function GenerateRFQ() {
 
   const handleExport = async () => {
     if (!draftText) return;
+
+    try {
+      // Automatically save before export
+      await handleSave();
+    } catch (e) {
+      console.error("Export aborted: save failed", e);
+      return;
+    }
 
     try {
       const res = await fetch(`${BACKEND}/export/pdf`, {
@@ -461,39 +438,8 @@ export default function GenerateRFQ() {
                       />
                     ) : (
                       <ScrollArea className="flex-1 bg-white">
-                        <div className="p-10 max-w-4xl mx-auto prose prose-slate prose-sm md:prose-base !prose-headings:text-slate-900 !prose-p:text-slate-600 prose-img:rounded-xl prose-img:shadow-lg">
-                          <ReactMarkdown
-                            remarkPlugins={[remarkGfm]}
-                            components={{
-                              h2: ({ node, ...props }) => (
-                                <h2 className="text-2xl font-extrabold text-[#006680] mt-16 mb-8 border-b-2 pb-3 border-slate-200 uppercase tracking-tight" {...props} />
-                              ),
-                              p: ({ node, ...props }) => (
-                                <p className="mb-12 leading-[1.8] whitespace-pre-wrap text-slate-800 font-sans text-lg" {...props} />
-                              ),
-                              img: ({ node, ...props }) => (
-                                <div className="my-12 flex flex-col items-center">
-                                  <img
-                                    {...props}
-                                    className="max-h-[600px] w-full object-contain rounded-2xl shadow-2xl border border-slate-200"
-                                    onError={(e) => {
-                                      console.error("❌ Image failed to load:", props.src);
-                                      e.currentTarget.style.display = 'none';
-                                      const fallback = document.createElement('div');
-                                      fallback.className = "p-4 border-2 border-dashed border-red-200 rounded-xl bg-red-50 text-red-500 text-xs text-center";
-                                      fallback.innerText = `Image Failed to Load (ID: ${props.src?.split('/').pop()})`;
-                                      e.currentTarget.parentElement?.appendChild(fallback);
-                                    }}
-                                  />
-                                  <span className="mt-4 text-[11px] uppercase tracking-[0.2em] text-slate-500 font-black bg-slate-100 px-4 py-2 rounded-full border border-slate-200 shadow-sm">
-                                    {props.alt || "Vision Component Illustration"}
-                                  </span>
-                                </div>
-                              )
-                            }}
-                          >
-                            {processedDraftText}
-                          </ReactMarkdown>
+                        <div className="p-10 max-w-4xl mx-auto">
+                          <RFQMarkdown content={draftText} />
                         </div>
                       </ScrollArea>
                     )}

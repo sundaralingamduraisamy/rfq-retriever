@@ -88,18 +88,19 @@ class DatabaseManager:
             cursor.close()
             self.return_connection(conn)
 
-    def execute_update(self, query: str, params: tuple = None) -> bool:
-        """Execute INSERT/UPDATE/DELETE"""
+    def execute_update(self, query: str, params: tuple = None) -> int:
+        """Execute INSERT/UPDATE/DELETE and return affected row count"""
         conn = self.get_connection()
         cursor = conn.cursor()
         try:
             cursor.execute(query, params or ())
+            count = cursor.rowcount
             conn.commit()
-            return True
+            return count
         except psycopg2.Error as e:
             conn.rollback()
             print(f"❌ Update error: {e}")
-            return False
+            return -1
         finally:
             cursor.close()
             self.return_connection(conn)
