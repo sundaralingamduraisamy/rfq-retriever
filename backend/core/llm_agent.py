@@ -391,6 +391,7 @@ class ChatAgent:
         # Build context
         context_messages = []
         found_documents = []
+        response_text = "I analyzed the context but couldn't finalize a response after several attempts. Please try again."
         
         # System prompt
         base_prompt = load_prompt("chat_system_prompt.md")
