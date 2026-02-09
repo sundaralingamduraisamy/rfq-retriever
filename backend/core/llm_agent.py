@@ -70,8 +70,7 @@ class ChatAgent:
             preview = truncated_text[:200].replace("\n", " ")
             
             summary += f"{i}. [{src['file']}] (Relevance: {item['relevance']}%)\n"
-            summary += f"   Preview: {preview}...\n"
-            summary += f"   Summary: {truncated_text}\n\n"
+            summary += f"   TECHNICAL DATA: {truncated_text}\n\n"
             
             # Add to found list
             found_docs.append({
@@ -534,9 +533,12 @@ class ChatAgent:
                         return llm.invoke(context_messages).content, found_documents, None
                      except:
                         pass
-                return f"I encountered an issue while processing tools: {err_str}", found_documents, None
+                return f"I encountered an issue while processing tools: {err_str}", [], None
         
-        return "I found some information but need more specific guidance.", found_documents, self.pending_update
+        # Only return sources if we actually updated the draft or if it's the final turn
+        # This prevents sources from "popping up" prematurely during validation turns
+        final_sources = found_documents if (self.pending_update or iteration >= 2) else []
+        return response_text, final_sources, self.pending_update
 
 
 # Singleton
