@@ -157,7 +157,8 @@ def render_pdf(rfq: dict, no: int) -> bytes:
         if entries:
             story.append(create_toc_table(entries))
         else:
-            story.append(Paragraph("Generating TOC...", styles["Body"]))
+            # First pass: Placeholder
+            story.append(Spacer(1, 50))
         story.append(PageBreak())
 
         # -- CONTENT PARSER --
@@ -186,14 +187,15 @@ def render_pdf(rfq: dict, no: int) -> bytes:
                 in_table = True
                 continue
             elif in_table:
-                num_cols = len(table_data[0])
-                col_widths = [(A4[0] - 100) / num_cols] * num_cols
-                para_table = [[Paragraph(f"<b>{c}</b>" if r==0 else c, styles["Body"]) for c in row] for r, row in enumerate(table_data)]
-                t = Table(para_table, colWidths=col_widths)
-                t.setStyle(table_style)
-                story.append(Spacer(1, 15))
-                story.append(t)
-                story.append(Spacer(1, 24))
+                if table_data:
+                    num_cols = len(table_data[0])
+                    col_widths = [(A4[0] - 100) / num_cols] * num_cols
+                    para_table = [[Paragraph(f"<b>{c}</b>" if r==0 else c, styles["Body"]) for c in row] for r, row in enumerate(table_data)]
+                    t = Table(para_table, colWidths=col_widths)
+                    t.setStyle(table_style)
+                    story.append(Spacer(1, 15))
+                    story.append(t)
+                    story.append(Spacer(1, 24))
                 table_data = []
                 in_table = False
 
@@ -224,14 +226,25 @@ def render_pdf(rfq: dict, no: int) -> bytes:
                         line = line.replace(f"[[IMAGE_ID:{img_id}]]", "").strip()
                         if not line: continue
 
-            # --- Header Detection ---
+            # --- Robust Header Detection (Sync with Frontend) ---
+            # Strip bold wrappers if present for detection
+            clean_line = line.replace("**", "").replace("__", "").replace("#", "").strip()
+            # Match "1. Title" or "1.1 Title" or "Section 1: Title"
+            is_header_like = re.match(r"^(\d+\.|\d+\.\d+|Section\s+\d+:)", clean_line, re.IGNORECASE)
+            
+            if is_header_like and len(clean_line) < 100:
+                is_sub = "." in clean_line.split(" ")[0] if clean_line else False
+                style = styles["Heading2"] if is_sub else styles["Heading1"]
+                story.append(Paragraph(clean_line, style))
+                continue
+
+            # --- Standard Markdown Header Fallback ---
             if line.startswith('### '):
-                story.append(Paragraph(line[4:], styles["Heading3"]))
+                story.append(Paragraph(line[4:].strip(), styles["Heading3"]))
             elif line.startswith('## '):
                 story.append(Paragraph(line[3:].strip(), styles["Heading2"]))
             elif line.startswith('# '):
                 header_text = line[2:].strip()
-                # Skip TABLE OF CONTENTS - it's auto-generated on page 2
                 if header_text.upper() == "TABLE OF CONTENTS":
                     continue
                 story.append(Paragraph(header_text, styles["Heading1"]))
