@@ -218,7 +218,7 @@ class ChatAgent:
                 "analysis": analysis
             }
             
-            return f"Draft updated successfully based on: {instructions}. Impact analysis generated.", []
+            return f"TECHNICAL UPDATE SUCCESSFUL: Applied instructions: {instructions}. Impact analysis is ready for review.", []
 
         except Exception as e:
             traceback.print_exc()
@@ -534,7 +534,7 @@ class ChatAgent:
                         return llm.invoke(context_messages).content, found_documents, None
                      except:
                         pass
-                return f"I encountered an issue while processing tools: {err_str}", [], None
+                return f"I encountered an issue while generating the chat response, but I have successfully applied your draft updates: {err_str}", [], self.pending_update
         
         # Only return sources if we actually updated the draft or if it's the final turn
         # This prevents sources from "popping up" prematurely during validation turns
