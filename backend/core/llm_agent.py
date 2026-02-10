@@ -203,31 +203,24 @@ class ChatAgent:
             updated_text = sub_invoke("edit_rfq_system.md", edit_prompt)
             updated_text = clean_text(updated_text)
             
-            # --- IMAGE ID HALLUCINATION GUARD ---
-            # Extract all valid image IDs from the context provided to the sub-agent
+            # --- IMAGE DEDUPLICATION & HALLUCINATION GUARD ---
+            # Extract valid image IDs from the context to verify the agent isn't inventing them
             valid_ids = [str(d.get("image_id")) for d in context_docs if d.get("image_id")]
-            
-            # Find all tags the agent wrote (including hallucinations like [[IMAGE_ID:cylinder-head.jpg]])
-            # We use [^\]]+ to catch anything that is not a closing bracket
-            matches = re.findall(r"\[\[IMAGE_ID:([^\]]+)\]\]", updated_text)
-            
-            if not valid_ids:
-                # Scenario A: No images are available at all.
-                # If the agent hallucinated a tag, we MUST remove it to avoid 404s.
-                for mid in matches:
-                    print(f"⚠️ Hallucination Guard: Removing hallucinated tag/ID '{mid}' (No images available)")
-                    updated_text = updated_text.replace(f"[[IMAGE_ID:{mid}]]", "")
-            else:
-                # Scenario B: Images exist, but agent might have used a wrong/made-up ID.
-                # STRICT VALIDATION: Only allow numeric IDs that exist in valid_ids
-                for mid in matches:
-                    # Check if ID is numeric and valid
-                    if mid.isdigit() and mid in valid_ids:
-                        print(f"✅ Hallucination Guard: Image ID {mid} is valid.")
-                    else:
-                        # Invalid ID (non-numeric or not in valid list) - REMOVE IT
-                        print(f"⚠️ Hallucination Guard: Removing invalid/hallucinated tag/ID '{mid}' (Not a valid numeric ID)")
-                        updated_text = updated_text.replace(f"[[IMAGE_ID:{mid}]]", "")
+            seen_in_draft = set()
+
+            def image_guard_callback(match):
+                mid = match.group(1)
+                # Valid if: It's numeric AND it was provided in context AND it hasn't appeared yet
+                if mid.isdigit() and mid in valid_ids and mid not in seen_in_draft:
+                    seen_in_draft.add(mid)
+                    return f"[[IMAGE_ID:{mid}]]"
+                
+                # Otherwise, it's a hallucination or a duplicate - REMOVE IT
+                # print(f"⚠️ Image Guard: Removing tag [[IMAGE_ID:{mid}]] (Reason: {'Duplicate' if mid in seen_in_draft else 'Invalid/Hallucinated'})")
+                return ""
+
+            # Apply the guard to the entire updated text
+            updated_text = re.sub(r"\[\[IMAGE_ID:([^\]]+)\]\]", image_guard_callback, updated_text)
             
             # 2. Analyze Impact
             analysis_prompt = load_prompt("analyze_changes_user.md", 
