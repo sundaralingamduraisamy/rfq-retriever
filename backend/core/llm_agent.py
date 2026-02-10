@@ -126,6 +126,30 @@ class ChatAgent:
             return f"Summary for {filename}:\n{truncated}", [{"file": filename, "score": 100, "preview": "Full Document Accessed", "full_text": truncated}]
         return "Summary not found.", []
 
+    def _extract_previous_images(self, messages: List[Dict]) -> List[Dict]:
+        """Scans assistant messages for image IDs and descriptions to re-populate found_documents"""
+        found = []
+        # Pattern like: 1. [ID: 67] Description: brake schematic (from...)
+        pattern = r"\[ID: (\d+)\] Description: (.*?) \(from"
+        
+        for m in messages:
+            if m.get("role") in ["assistant", "agent"] or m.get("role") == "assistant":
+                content = m.get("content") or ""
+                matches = re.finditer(pattern, content)
+                for match in matches:
+                    img_id = match.group(1)
+                    desc = match.group(2).strip()
+                    
+                    # Deduplicate within recovery
+                    if not any(f.get("image_id") == int(img_id) for f in found):
+                        found.append({
+                            "image_id": int(img_id),
+                            "description": desc,
+                            "text": f"IMAGE INFO: [ID: {img_id}] Description: {desc}",
+                            "file": "Previous Search"
+                        })
+        return found
+
     def _update_rfq_draft(self, instructions: str, context_docs: List[Dict] = []):
         """
         Internal tool to update the draft editor.
@@ -390,7 +414,11 @@ class ChatAgent:
         
         # Build context
         context_messages = []
-        found_documents = []
+        
+        # 0. Recover previous context images from history to prevent "lost images" during editing
+        # This ensures the drafter sub-agent always has the required Metadata for IDs mentioned in history
+        found_documents = self._extract_previous_images(messages)
+        
         response_text = "I analyzed the context but couldn't finalize a response after several attempts. Please try again."
         
         # System prompt

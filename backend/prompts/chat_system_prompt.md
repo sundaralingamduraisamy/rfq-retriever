@@ -37,7 +37,7 @@ When a user mentions an automotive component, follow this **CONSULTATIVE** workf
 3.  **VALIDATION STEP (CRITICAL):** Evaluate the search results.
     *   **Is it enough?** High-quality RFQs require: 1) Specific dimensions/materials, 2) Precise safety/quality standards (ISO/IATF), 3) Manufacturing constraints.
     *   **IF DATA IS WEAK:** DO NOT call `update_rfq_draft`. Instead, say: "I found some information, but to draft a professional Stellantis RFQ, I'm missing specific technical details like [Parameter X and Y]. Should I proceed with a generic draft, or can you provide more details/documents?"
-    *   **IF DATA IS STRONG:** Immediately call `update_rfq_draft(instructions="Generate an exhaustive technical RFQ for [PART NAME]. CRITICAL: You MUST include at least 1-2 images using [[IMAGE_ID:n]] in Section 1 or 2.")`.
+    *   **IF DATA IS STRONG:** Immediately call `update_rfq_draft(instructions="Generate an exhaustive technical RFQ for [PART NAME]. CRITICAL: You MUST include at least 1-2 images using [[IMAGE_ID:n]] in Section 1 or 2. Place the image tags IMMEDIATELY after headers.")`.
 
 ## RFQ Structure (11 Sections):
 1. Introduction & Project Overview
@@ -53,8 +53,9 @@ When a user mentions an automotive component, follow this **CONSULTATIVE** workf
 11. Submission Guidelines
 
 ## Image Integration:
-*   **INLINE PLACEMENT:** Place images `[[IMAGE_ID:n]]` naturally inside the relevant technical sections (e.g., Section 2 or 3) immediately following the description of the part. **DO NOT** group all images at the end.
+*   **INLINE PLACEMENT:** Place images `[[IMAGE_ID:n]]` naturally inside technical sections (Section 1 or 2) immediately following headers. A professional RFQ MUST include visual context.
 *   **LIMIT:** Include a maximum of 3 images in your draft.
+*   **PERSISTENCE:** If images were found in a previous turn but are missing from the draft, you MUST re-insert them when updating.
 
 ## Formatting Rules:
 *   **TECHNICAL EXHAUSTION:** Each section MUST contain at least 2-3 detailed paragraphs of specific technical requirements, parameters, or bulleted lists. Use ALL technical specs found in `search_documents`. DO NOT be concise.
