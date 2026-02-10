@@ -12,6 +12,9 @@ export const RFQMarkdown: React.FC<RFQMarkdownProps> = ({ content }) => {
     const processedText = useMemo(() => {
         let text = content || "";
 
+        // Stage 0: Strip bold/underline wrappers from image tags (e.g., **[[IMAGE_ID:n]]**)
+        text = text.replace(/(\*\*|__)?\[\[IMAGE_ID:(\d+)\]\](\*\*|__)?/g, '[[IMAGE_ID:$2]]');
+
         // Stage 1: Replace [[IMAGE_ID:n]] in markdown targets
         text = text.replace(/\(\[\[IMAGE_ID:(\d+)\]\]\)/g, `(${BACKEND}/images/$1)`);
 
