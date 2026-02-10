@@ -40,12 +40,12 @@ export const RFQMarkdown: React.FC<RFQMarkdownProps> = ({ content }) => {
                 // SKIP: If it's the TOC section specifically
                 if (/^1\.\s+TABLE OF CONTENTS/i.test(trimmed)) return line;
 
+                const cleanLine = trimmed.replace(/^\*\*|\*\*$/g, '').trim();
+
                 // Match "1. Title" or "1.1 Title" or "Section 1: Title"
-                const isHeaderLike = /^(\d+\.|\d+\.\d+|Section\s+\d+:)/i.test(trimmed);
-                if (isHeaderLike && trimmed.length < 100) {
-                    if (trimmed.length > 20 || /^[A-Z]/.test(trimmed.split('. ')[1] || "")) {
-                        return `## ${trimmed}`;
-                    }
+                const isHeaderLike = /^(\d+\.|\d+\.\d+|Section\s+\d+:)/i.test(cleanLine);
+                if (isHeaderLike && cleanLine.length < 100) {
+                    return `## ${cleanLine}`;
                 }
                 return line;
             });
@@ -62,7 +62,7 @@ export const RFQMarkdown: React.FC<RFQMarkdownProps> = ({ content }) => {
                         <h2 className="text-2xl font-extrabold text-[#006680] mt-16 mb-8 border-b-2 pb-3 border-slate-200 uppercase tracking-tight" {...props} />
                     ),
                     h3: ({ node, ...props }) => (
-                        <h3 className="text-xl font-bold text-[#006680] mt-8 mb-4 capitalize" {...props} />
+                        <h3 className="text-2xl font-bold text-[#006680] mt-10 mb-6 capitalize" {...props} />
                     ),
                     p: ({ node, ...props }) => (
                         <p className="mb-12 leading-[1.8] whitespace-pre-wrap text-slate-800 font-sans text-lg" {...props} />
