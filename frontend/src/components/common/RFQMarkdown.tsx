@@ -62,13 +62,13 @@ export const RFQMarkdown: React.FC<RFQMarkdownProps> = ({ content }) => {
                         <h2 className="text-2xl font-extrabold text-[#006680] mt-16 mb-8 border-b-2 pb-3 border-slate-200 uppercase tracking-tight" {...props} />
                     ),
                     h3: ({ node, ...props }) => (
-                        <h3 className="text-xl font-bold text-slate-800 mt-8 mb-4 capitalize" {...props} />
+                        <h3 className="text-xl font-bold text-[#006680] mt-8 mb-4 capitalize" {...props} />
                     ),
                     p: ({ node, ...props }) => (
                         <p className="mb-12 leading-[1.8] whitespace-pre-wrap text-slate-800 font-sans text-lg" {...props} />
                     ),
                     strong: ({ node, ...props }) => (
-                        <strong className="font-bold text-slate-900" {...props} />
+                        <strong className="font-bold text-[#006680]" {...props} />
                     ),
                     table: ({ node, ...props }) => (
                         <div className="my-8 w-full overflow-hidden rounded-xl border border-slate-200 shadow-sm">
