@@ -101,11 +101,40 @@ class EmbeddingIndexer:
                         for cell in row.cells:
                             full_text += cell.text + " "
                     full_text += "\n"
+            elif file_ext in ['md', 'txt']:
+                # Plain text / Markdown
+                full_text = file_content.decode('utf-8', errors='ignore')
             else:
                 print(f"❌ Unsupported file type: {file_ext}")
                 return {"success": False, "error": "Unsupported file type"}
 
-            # --- New: Image Extraction and Filtering ---
+            # --- New: Image Context Injection for Generated RFQs ---
+            # If this is a generated RFQ (markdown), it might contain [[IMAGE_ID:n]] tags.
+            # We want to fetch those image descriptions and append them to the summary context
+            # so that searching for "fuel pump image" finds this RFQ.
+            import re
+            image_tags = re.findall(r"\[\[IMAGE_ID:(\d+)\]\]", full_text)
+            image_context = ""
+            
+            if image_tags:
+                print(f"   🖼️ Found {len(image_tags)} image references. Fetching context...")
+                unique_ids = list(set(image_tags))
+                # Fetch descriptions for these IDs
+                # We need to query the DB for these specific IDs
+                placeholders = ','.join(['%s'] * len(unique_ids))
+                img_rows = db.execute_query(f"SELECT id, description FROM document_images WHERE id IN ({placeholders})", tuple(unique_ids))
+                
+                if img_rows:
+                    image_context = "\n\n--- REFERENCED IMAGES CONTEXT ---\n"
+                    for r in img_rows:
+                        image_context += f"[Image ID {r[0]}]: {r[1]}\n"
+                    
+                    # Append strictly for summarization/embedding (not modifying original file content)
+                    print(f"   ✅ Injected context for {len(img_rows)} images into summary input.")
+            
+            # ------------------------------------------
+
+            # --- New: Image Extraction (Standard Uploads) ---
             print(f"   📸 Extracting and filtering images...")
             processed_images = image_processor.process_content(file_content, file_ext)
             
@@ -131,7 +160,9 @@ class EmbeddingIndexer:
 
             # 3. Summarize
             print("   Generating summary...")
-            summary = self.summarize(full_text)
+            # Append image context to the text being summarized so the LLM knows about the visuals
+            summary_input = full_text + image_context
+            summary = self.summarize(summary_input)
             print(f"   ✅ Model Summary:\n{summary}\n")
             
             # 4. Embed

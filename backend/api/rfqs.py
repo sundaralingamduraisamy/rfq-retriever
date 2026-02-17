@@ -86,8 +86,24 @@ def save_rfq(data: SaveRFQModel):
         if not row:
             print("❌ Failed to insert RFQ into database")
             raise HTTPException(500, "Failed to insert RFQ")
-        print(f"✅ New RFQ created with ID: {row[0]}")
-        return {"status": "created", "id": row[0], "title": data.title}
+        rfq_id = row[0]
+        print(f"✅ New RFQ created with ID: {rfq_id}")
+        
+        # --- AUTO-INDEXING FOR RETRIEVAL ---
+        # Make this RFQ valid for search immediately
+        try:
+            from core.ingestion import indexer
+            # Create a virtual filename for the index
+            virtual_filename = f"Generated_RFQ_{rfq_id}_{data.title}.md"
+            print(f"🔍 Auto-indexing generated RFQ as: {virtual_filename}")
+            
+            # Index content (as bytes for consistency)
+            indexer.index_document(virtual_filename, data.content.encode('utf-8'), category="Generated RFQ")
+        except Exception as idx_err:
+            print(f"⚠️ Warning: Failed to auto-index RFQ: {idx_err}")
+        # -----------------------------------
+
+        return {"status": "created", "id": rfq_id, "title": data.title}
 
     except Exception as e:
         print(f"❌ Save error: {e}")
