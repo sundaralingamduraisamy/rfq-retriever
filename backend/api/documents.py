@@ -152,6 +152,8 @@ def view_document_by_id(doc_id: int):
         media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     elif ext == "xlsx":
          media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    elif ext in ["md", "txt"]:
+         media_type = "text/markdown; charset=utf-8"
          
     return Response(content=content, media_type=media_type, headers={"Content-Disposition": "inline"})
 
@@ -173,6 +175,8 @@ def view_document_by_name(filename: str):
         media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     elif ext == "xlsx":
          media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    elif ext in ["md", "txt"]:
+         media_type = "text/markdown; charset=utf-8"
          
     return Response(content=content, media_type=media_type, headers={"Content-Disposition": "inline"})
 

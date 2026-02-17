@@ -106,6 +106,9 @@ def get_full_rfq(filename: str) -> str:
                     for cell in row.cells:
                         text += cell.text + " "
                 text += "\n"
+        elif file_ext in ['md', 'txt']:
+            # Plain text / Markdown
+            text = file_content.decode('utf-8', errors='ignore')
         else:
             return f"Unsupported file type: {file_ext}"
             
