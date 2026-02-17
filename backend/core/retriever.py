@@ -137,7 +137,7 @@ def search_images(query: str, top_k: int = 3):
         query_vec = text_features[0].tolist()
         embedding_str = str(query_vec)
 
-        # 2. Search in DB
+        # 2. Search in DB - We fetch more (10) but will filter down
         sql_query = """
             SELECT 
                 di.id,
@@ -149,24 +149,44 @@ def search_images(query: str, top_k: int = 3):
             JOIN document_images di ON ie.image_id = di.id
             JOIN documents d ON di.document_id = d.id
             ORDER BY similarity DESC
-            LIMIT %s
+            LIMIT 30
         """
         
-        results = db.execute_query(sql_query, (embedding_str, top_k))
+        results = db.execute_query(sql_query, (embedding_str,))
         
         formatted = []
-        for r in results:
+        trusted_files = set()
+        
+        # Pass 1: Identify "Trusted" documents (Any file with a score > 0.25 is trusted)
+        # Also, the #1 global best result's file is ALWAYS trusted (Discovery Mode)
+        for i, r in enumerate(results):
+            filename = r[2]
             similarity = float(r[3])
-            # print(f"DEBUG: Retrieved Image ID {r[0]} | Similarity: {similarity:.4f} | Desc: {r[1]}")
+            if i == 0 and similarity >= 0.05:
+                trusted_files.add(filename)
+            if similarity >= 0.25:
+                trusted_files.add(filename)
+
+        # Pass 2: Collect images using Document-Aware thresholds
+        for r in results:
+            img_id = r[0]
+            description = r[1]
+            filename = r[2]
+            similarity = float(r[3])
+            image_data = r[4]
             
-            if similarity < 0.15: continue # Increased Threshold from 0.05 to 0.15
+            # If the file is trusted (has high-score content), use 0.05.
+            # If it's a random file, use 0.35.
+            threshold = 0.05 if filename in trusted_files else 0.35
+            
+            if similarity < threshold: continue
             
             formatted.append({
-                "id": r[0],
-                "description": r[1],
-                "file": r[2],
+                "id": img_id,
+                "description": description,
+                "file": filename,
                 "relevance": round(similarity * 100, 2),
-                "data": r[4] # Binary data for rendering
+                "data": image_data
             })
             
         return formatted

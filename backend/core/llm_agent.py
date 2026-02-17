@@ -127,27 +127,56 @@ class ChatAgent:
         return "Summary not found.", []
 
     def _extract_previous_images(self, messages: List[Dict]) -> List[Dict]:
-        """Scans assistant messages for image IDs and descriptions to re-populate found_documents"""
+        """Scans assistant messages for image IDs and descriptions AND verifies they still exist in DB"""
         found = []
         # Pattern like: 1. [ID: 67] Description: brake schematic (from...)
         pattern = r"\[ID: (\d+)\] Description: (.*?) \(from"
         
+        # 1. Collect all candidate IDs mentioned in history
+        candidate_ids = []
         for m in messages:
             if m.get("role") in ["assistant", "agent"] or m.get("role") == "assistant":
                 content = m.get("content") or ""
                 matches = re.finditer(pattern, content)
                 for match in matches:
+                    candidate_ids.append(match.group(1))
+        
+        if not candidate_ids:
+            return []
+
+        # 2. Verify existence in DB to prevent "memory leaks" from deleted files
+        unique_ids = list(set(candidate_ids))
+        placeholders = ','.join(['%s'] * len(unique_ids))
+        try:
+            db_rows = db.execute_query(
+                f"SELECT id, description FROM document_images WHERE id IN ({placeholders})", 
+                tuple(unique_ids)
+            )
+            valid_db_ids = {str(r[0]): r[1] for r in db_rows}
+        except:
+            valid_db_ids = {}
+
+        # 3. Only re-populate context with images that still exist
+        for m in messages:
+            if m.get("role") in ["assistant", "agent"]:
+                content = m.get("content") or ""
+                matches = re.finditer(pattern, content)
+                for match in matches:
                     img_id = match.group(1)
-                    desc = match.group(2).strip()
                     
-                    # Deduplicate within recovery
-                    if not any(f.get("image_id") == int(img_id) for f in found):
-                        found.append({
-                            "image_id": int(img_id),
-                            "description": desc,
-                            "text": f"IMAGE INFO: [ID: {img_id}] Description: {desc}",
-                            "file": "Previous Search"
-                        })
+                    if img_id in valid_db_ids:
+                        # Deduplicate within recovery
+                        if not any(f.get("image_id") == int(img_id) for f in found):
+                            found.append({
+                                "image_id": int(img_id),
+                                "description": valid_db_ids[img_id],
+                                "text": f"IMAGE INFO: [ID: {img_id}] Description: {valid_db_ids[img_id]}",
+                                "file": "Previous Search"
+                            })
+        
+        if candidate_ids and not found:
+            print(f"🕵️ Recovery: All {len(candidate_ids)} images mentioned in history were purged from DB. Memory cleared.")
+            
         return found
 
     def _update_rfq_draft(self, instructions: str, context_docs: List[Dict] = []):
@@ -504,6 +533,21 @@ class ChatAgent:
                 
                 # No tool call -> Final Response
                 response_text = response.content
+                
+                # --- FINAL IMAGE SCRUBBER ---
+                # Remove any [[IMAGE_ID:n]] tags that are not in our verified found_documents
+                # This prevents the AI from "hallucinating" or using deleted IDs in the final chat message
+                valid_ids = [str(d.get("image_id")) for d in found_documents if d.get("image_id")]
+                
+                def final_scrub_cb(match):
+                    mid = match.group(1)
+                    if mid in valid_ids:
+                        return f"[[IMAGE_ID:{mid}]]"
+                    return "" # Remove invalid/deleted tag
+
+                response_text = re.sub(r"\[\[IMAGE_ID:([^\]]+)\]\]", final_scrub_cb, response_text)
+                # ---------------------------
+
                 # print(f"✅ Final Response. Found docs: {len(found_documents)}")
                 return response_text, found_documents, self.pending_update
                 

@@ -80,27 +80,39 @@ async def upload_document(file: UploadFile = File(...), category: str = Form("Ge
 
 @router.delete("/documents/{doc_id}")
 def delete_document(doc_id: int):
-    """Delete document from DB by ID (Cascades to chunks/summaries)"""
+    """Delete document from DB by ID (Cascades to chunks/summaries/images)"""
     if not db:
         raise HTTPException(500, "Database connection failed")
         
-    # Check if exists
+    # Check if exists and get filename for sync logic
     exists = db.execute_query_single("SELECT filename FROM documents WHERE id = %s", (doc_id,))
     if not exists:
         raise HTTPException(404, "Document not found")
     
     filename = exists[0]
+    print(f"🗑️ Deleting document ID {doc_id} ('{filename}')...")
         
-    # Delete (Cascade should handle children)
     try:
+        # --- SYNC: If this is a generated RFQ, delete its record from generated_rfqs too ---
+        import re
+        # Pattern: Generated_RFQ_123_Title.md
+        match = re.search(r"^Generated_RFQ_(\d+)_", filename)
+        if match:
+            rfq_id = int(match.group(1))
+            print(f"   🔄 Syncing: Deleting related generated_rfq ID {rfq_id}...")
+            db.execute_update("DELETE FROM generated_rfqs WHERE id = %s", (rfq_id,))
+        # ---------------------------------------------------------------------------------
+
+        # Delete from documents (Cascade handles summaries, embeddings, and images)
         success_count = db.execute_update("DELETE FROM documents WHERE id = %s", (doc_id,))
         
         if success_count > 0:
+            print(f"✅ Document {doc_id} and all related embeddings/images deleted.")
             return {"status": "deleted", "filename": filename, "id": doc_id}
         else:
             raise HTTPException(500, "Failed to delete document from database")
     except Exception as e:
-        print(f"❌ Critical error during document deletion (ID: {doc_id}): {e}")
+        print(f"❌ Error during document deletion (ID: {doc_id}): {e}")
         raise HTTPException(500, f"Database deletion error: {str(e)}")
 
 

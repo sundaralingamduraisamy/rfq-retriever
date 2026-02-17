@@ -422,9 +422,11 @@ export default function GenerateRFQ() {
                       title="Preview"
                     />
                   ) : (
-                    <div className="p-8 h-full overflow-y-auto bg-white">
-                      <pre className="whitespace-pre-wrap font-sans text-sm">{referenceText || "Loading..."}</pre>
-                    </div>
+                    <ScrollArea className="h-full bg-white">
+                      <div className="p-10 max-w-4xl mx-auto">
+                        <RFQMarkdown content={referenceText || "Loading..."} />
+                      </div>
+                    </ScrollArea>
                   )
                 ) : (
                   /* Persistent Draft Editor */

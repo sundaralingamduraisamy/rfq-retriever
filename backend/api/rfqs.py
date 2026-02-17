@@ -152,15 +152,35 @@ def get_rfq_detail(rfq_id: int):
     
 @router.delete("/rfqs/{rfq_id}")
 def delete_rfq_db(rfq_id: int):
-    """Delete RFQ from DB"""
+    """Delete RFQ from DB and its corresponding index in the document library"""
     if not db:
         raise HTTPException(500, "Database connection failed")
         
-    success = db.execute_update("DELETE FROM generated_rfqs WHERE id = %s", (rfq_id,))
-    if success:
-        return {"status": "deleted", "id": rfq_id}
-    else:
-        raise HTTPException(500, "Failed to delete RFQ")
+    print(f"🗑️ Deleting RFQ ID {rfq_id}...")
+
+    try:
+        # --- SYNC: Find and delete the indexed document version too ---
+        # Pattern: Generated_RFQ_123_*.md
+        doc_match = db.execute_query_single(
+            "SELECT id, filename FROM documents WHERE filename LIKE %s", 
+            (f"Generated_RFQ_{rfq_id}_%",)
+        )
+        if doc_match:
+            doc_id, doc_name = doc_match
+            print(f"   🔄 Syncing: Purging indexed document '{doc_name}' (ID: {doc_id})...")
+            db.execute_update("DELETE FROM documents WHERE id = %s", (doc_id,))
+        # ---------------------------------------------------------------
+
+        # Delete the main RFQ record
+        success = db.execute_update("DELETE FROM generated_rfqs WHERE id = %s", (rfq_id,))
+        if success:
+            print(f"✅ RFQ {rfq_id} deleted successfully.")
+            return {"status": "deleted", "id": rfq_id}
+        else:
+            raise HTTPException(404, "RFQ not found")
+    except Exception as e:
+        print(f"❌ Error during RFQ deletion (ID: {rfq_id}): {e}")
+        raise HTTPException(500, f"Deletion failed: {str(e)}")
 
 @router.get("/rfqs/{rfq_id}/pdf")
 def get_rfq_pdf(rfq_id: int):
