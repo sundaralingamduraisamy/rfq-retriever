@@ -18,7 +18,6 @@ class DatabaseManager:
                 connect_timeout=5
             )
         except psycopg2.Error as e:
-            print(f"❌ Database connection failed: {e}")
             raise
 
     def _ensure_database_exists(self):
@@ -41,15 +40,13 @@ class DatabaseManager:
             exists = cur.fetchone()
             
             if not exists:
-                print(f"🛠️  Database '{settings.POSTGRES_DB}' not found. Creating...")
                 cur.execute(f"CREATE DATABASE {settings.POSTGRES_DB}")
-                print(f"✅ Database '{settings.POSTGRES_DB}' created successfully.")
             
             cur.close()
             conn.close()
         except Exception as e:
-            print(f"⚠️ Warning: Could not verify/create database: {e}")
             # We don't raise here, we let the main connection attempt fail if it must.
+            pass
 
     def get_connection(self):
         return self.pool.getconn()
@@ -68,7 +65,6 @@ class DatabaseManager:
             cursor.execute(query, params or ())
             return cursor.fetchall()
         except psycopg2.Error as e:
-            print(f"❌ Query error: {e}")
             return []
         finally:
             cursor.close()
@@ -82,7 +78,6 @@ class DatabaseManager:
             cursor.execute(query, params or ())
             return cursor.fetchone()
         except psycopg2.Error as e:
-            print(f"❌ Query error: {e}")
             return None
         finally:
             cursor.close()
@@ -99,7 +94,6 @@ class DatabaseManager:
             return count
         except psycopg2.Error as e:
             conn.rollback()
-            print(f"❌ Update error: {e}")
             return -1
         finally:
             cursor.close()
@@ -116,7 +110,6 @@ class DatabaseManager:
             return result
         except psycopg2.Error as e:
             conn.rollback()
-            print(f"❌ Insert error: {e}")
             return None
         finally:
             cursor.close()
@@ -189,10 +182,8 @@ class DatabaseManager:
                 for query in queries:
                     cur.execute(query)
                 conn.commit()
-                print("✅ Database tables created successfully")
         except psycopg2.Error as e:
             conn.rollback()
-            print(f"❌ Failed to create tables: {e}")
             raise
         finally:
             self.return_connection(conn)

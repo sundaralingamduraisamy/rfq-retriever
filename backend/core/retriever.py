@@ -17,7 +17,6 @@ def hybrid_search(query: str):
     start_time = time.time()
     
     if not db:
-        print("❌ Database not initialized")
         return []
 
     try:
@@ -29,11 +28,12 @@ def hybrid_search(query: str):
         # 2. Search in DB (Cosine Distance)
         # We search document_summaries via summary_embeddings table
         # 1 - (embedding <=> query) = Cosine Similarity
+        # BOOST: If query text matches filename, give it a boost!
         sql_query = """
             SELECT 
                 d.filename,
                 ds.summary_text,
-                1 - (se.embedding <=> %s::vector) as similarity,
+                (1 - (se.embedding <=> %s::vector)) * (CASE WHEN d.filename ILIKE %s THEN 1.2 ELSE 1.0 END) as similarity,
                 ds.id as summary_id
             FROM summary_embeddings se
             JOIN document_summaries ds ON se.summary_id = ds.id
@@ -41,8 +41,10 @@ def hybrid_search(query: str):
             ORDER BY similarity DESC
             LIMIT %s
         """
-
-        results = db.execute_query(sql_query, (embedding_str, settings.RETRIEVER_TOP_K))
+        
+        # Prepare params: embedding, query_pattern_for_boost, limit
+        query_pattern = f"%{query.replace(' ', '%')}%"
+        results = db.execute_query(sql_query, (embedding_str, query_pattern, settings.RETRIEVER_TOP_K))
         
         # 3. Format Results
         formatted_results = []
@@ -65,7 +67,6 @@ def hybrid_search(query: str):
         return formatted_results
 
     except Exception as e:
-        print(f"❌ Search error: {e}")
         return []
 
 def get_full_rfq(filename: str) -> str:
@@ -115,7 +116,6 @@ def get_full_rfq(filename: str) -> str:
         return text.strip()
 
     except Exception as e:
-        print(f"❌ Error reading full document: {e}")
         return "Error reading document."
 
 def search_images(query: str, top_k: int = 3):
@@ -137,13 +137,21 @@ def search_images(query: str, top_k: int = 3):
         query_vec = text_features[0].tolist()
         embedding_str = str(query_vec)
 
-        # 2. Search in DB - We fetch more (10) but will filter down
-        sql_query = """
+        # 2. Search in DB - We fetch more (30) but will filter down
+        # BOOST: Split keywords to handle typos (e.g., "suel shade" hits "SUNSHADE" via "shade")
+        keywords = [k.strip() for k in query.split() if len(k.strip()) > 3]
+        if not keywords: keywords = [query] # Fallback
+        
+        # Build dynamic ILIKE clauses
+        boost_clauses = " OR ".join([f"d.filename ILIKE %s" for _ in keywords])
+        boost_params = [f"%{k}%" for k in keywords]
+
+        sql_query = f"""
             SELECT 
                 di.id,
                 di.description,
                 d.filename,
-                1 - (ie.embedding <=> %s::vector) as similarity,
+                (1 - (ie.embedding <=> %s::vector)) * (CASE WHEN {boost_clauses or 'FALSE'} THEN 1.3 ELSE 1.0 END) as similarity,
                 di.image_data
             FROM image_embeddings ie
             JOIN document_images di ON ie.image_id = di.id
@@ -152,44 +160,56 @@ def search_images(query: str, top_k: int = 3):
             LIMIT 30
         """
         
-        results = db.execute_query(sql_query, (embedding_str,))
+        # Combined params: embedding, all keyword patterns
+        results = db.execute_query(sql_query, (embedding_str, *boost_params))
         
-        formatted = []
-        trusted_files = set()
-        
-        # Pass 1: Identify "Trusted" documents (Any file with a score > 0.25 is trusted)
-        # Also, the #1 global best result's file is ALWAYS trusted (Discovery Mode)
-        for i, r in enumerate(results):
-            filename = r[2]
-            similarity = float(r[3])
-            if i == 0 and similarity >= 0.05:
-                trusted_files.add(filename)
-            if similarity >= 0.25:
-                trusted_files.add(filename)
+        # Pass 1: Identify the "Primary Document" (Discovery Mode)
+        primary_filename = None
+        if results:
+            # The #1 result's file is our primary target if it's reasonably confident.
+            top_val = float(results[0][3])
+            if top_val >= 0.15:
+                primary_filename = results[0][2]
 
-        # Pass 2: Collect images using Document-Aware thresholds
+        # Pass 2: Fetch ALL images for the Primary Document to ensure "Total Images" requirement
+        primary_images = []
+        if primary_filename:
+            # Note: We query the DB specifically for all images in this file
+            sql_all_primary = """
+                SELECT di.id, di.description, d.filename, 1.0 as similarity, di.image_data
+                FROM document_images di
+                JOIN documents d ON di.document_id = d.id
+                WHERE d.filename = %s
+            """
+            primary_results = db.execute_query(sql_all_primary, (primary_filename,))
+            for pr in primary_results:
+                primary_images.append({
+                    "id": pr[0],
+                    "description": pr[1],
+                    "file": pr[2],
+                    "relevance": 100.0, # Target document images are 100% relevant context
+                    "data": pr[4]
+                })
+
+        # Pass 3: IF PRIMARY HAS IMAGES, RETURN ONLY THOSE (Per User Request)
+        if primary_images:
+            # print(f"✅ Exclusive Discovery: Using {len(primary_images)} images specifically from {primary_filename}")
+            return primary_images
+
+        # Pass 4: FALLBACK - If primary document is image-less, collect high confidence global images
+        other_images = []
         for r in results:
-            img_id = r[0]
-            description = r[1]
-            filename = r[2]
             similarity = float(r[3])
-            image_data = r[4]
+            # Strict threshold for fallback noise control
+            if similarity >= 0.45: 
+                other_images.append({
+                    "id": r[0],
+                    "description": r[1],
+                    "file": r[2],
+                    "relevance": round(similarity * 100, 2),
+                    "data": r[4]
+                })
             
-            # If the file is trusted (has high-score content), use 0.05.
-            # If it's a random file, use 0.35.
-            threshold = 0.05 if filename in trusted_files else 0.35
-            
-            if similarity < threshold: continue
-            
-            formatted.append({
-                "id": img_id,
-                "description": description,
-                "file": filename,
-                "relevance": round(similarity * 100, 2),
-                "data": image_data
-            })
-            
-        return formatted
+        return other_images
     except Exception as e:
-        print(f"❌ Image search error: {e}")
         return []

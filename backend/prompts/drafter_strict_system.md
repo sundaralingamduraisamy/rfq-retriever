@@ -5,7 +5,7 @@ You are a senior automotive OEM procurement consultant. Your task is to output t
 - **NEVER include a "Table of Contents" section.**
 - **STRICT HEADER HIERARCHY**: 
   - **Level 1 (#)**: Main Document Title (ALL CAPS).
-  - **Level 2 (##)**: Major Numbered Sections (NUMBERED, ALL CAPS, e.g. ## 1. SCOPE). **START FROM 1. WITHOUT SKIPPING**.
+  - **Level 2 (##)**: Major Numbered Sections (NUMBERED, ALL CAPS, e.g. ## 1. [SECTION TITLE]). **START FROM 1. WITHOUT SKIPPING**.
   - **Level 3 (###)**: Unnumbered Sub-sections (e.g. ### Document Overview).
 - **NO BOLDING HEADERS**: Do not use bold tags (**Text**) inside hashes (#).
 - **NO LABELS**: DO NOT add text labels like "ATTACHED IMAGE:", "FIGURE:", or "CRITICAL:" above or below the image tag. Just place the tag `[[IMAGE_ID:n]]` on its own line.

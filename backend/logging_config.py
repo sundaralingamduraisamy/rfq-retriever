@@ -15,17 +15,24 @@ def setup_logging():
     logging.getLogger("transformers").setLevel(logging.ERROR)
     logging.getLogger("transformers.tokenization_utils_base").setLevel(logging.ERROR)
     
-    # Set torch logging to ERROR only
+    # Set torch and other ML libraries logging to ERROR only
     logging.getLogger("torch").setLevel(logging.ERROR)
-    
-    # Set sentence_transformers logging to ERROR only
     logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
     
-    # Configure root logger
+    # Reduce HTTP-related noise (LangChain/Groq use these)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
+    
+    # Reduce LangChain internal noise
+    logging.getLogger("langchain").setLevel(logging.WARNING)
+    
+    # Configure root logger to WARNING for a cleaner terminal
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.WARNING,
         format='%(levelname)s: %(message)s'
     )
     
-    # Reduce uvicorn access log verbosity
+    # Explicitly set uvicorn logs
+    logging.getLogger("uvicorn.error").setLevel(logging.INFO)
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)

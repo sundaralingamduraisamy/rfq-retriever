@@ -21,7 +21,6 @@ from api import documents, rfqs, generator
 async def lifespan(app: FastAPI):
     # Startup
     if db:
-        print("🔄 Checking Database Tables...")
         db.create_tables()
     yield
     # Shutdown

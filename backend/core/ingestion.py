@@ -54,8 +54,6 @@ class EmbeddingIndexer:
         5. Store Vectors
         """
         try:
-            print(f"\n📄 Indexing: {filename} (Category: {category})")
-
             # 1. Store/Update Document Record with category
             db.execute_update(
                 """
@@ -105,7 +103,6 @@ class EmbeddingIndexer:
                 # Plain text / Markdown
                 full_text = file_content.decode('utf-8', errors='ignore')
             else:
-                print(f"❌ Unsupported file type: {file_ext}")
                 return {"success": False, "error": "Unsupported file type"}
 
             # --- New: Image Context Injection for Generated RFQs ---
@@ -117,7 +114,6 @@ class EmbeddingIndexer:
             image_context = ""
             
             if image_tags:
-                print(f"   🖼️ Found {len(image_tags)} image references. Fetching context...")
                 unique_ids = list(set(image_tags))
                 # Fetch descriptions for these IDs
                 # We need to query the DB for these specific IDs
@@ -130,19 +126,16 @@ class EmbeddingIndexer:
                         image_context += f"[Image ID {r[0]}]: {r[1]}\n"
                     
                     # Append strictly for summarization/embedding (not modifying original file content)
-                    print(f"   ✅ Injected context for {len(img_rows)} images into summary input.")
             
             # ------------------------------------------
 
             # --- New: Image Extraction (Standard Uploads) ---
-            print(f"   📸 Extracting and filtering images...")
             processed_images = image_processor.process_content(file_content, file_ext)
             
             auto_count = sum(1 for img in processed_images if img["is_automobile"])
             non_auto_count = len(processed_images) - auto_count
             
             if auto_count > 0:
-                print(f"   ✅ Found {auto_count} automobile-related images. Saving to DB...")
                 image_processor.save_images_to_db(doc_id, processed_images)
             
             image_stats = {
@@ -155,18 +148,14 @@ class EmbeddingIndexer:
             # ------------------------------------------
 
             if not full_text.strip():
-                print("❌ No text extracted")
                 return {"success": False, "error": "No text content", "image_stats": image_stats}
 
             # 3. Summarize
-            print("   Generating summary...")
             # Append image context to the text being summarized so the LLM knows about the visuals
             summary_input = full_text + image_context
             summary = self.summarize(summary_input)
-            print(f"   ✅ Model Summary:\n{summary}\n")
             
             # 4. Embed
-            print("   Generating embedding...")
             model = get_embedding_model()
             embedding = model.encode(summary)
             embedding_str = str(embedding.tolist())
@@ -201,13 +190,9 @@ class EmbeddingIndexer:
                 (summary_id, embedding_str)
             )
 
-            print(f"✅ Successfully indexed {filename}")
             return {"success": True, "image_stats": image_stats}
 
         except Exception as e:
-            print(f"❌ Indexing error: {e}")
-            import traceback
-            traceback.print_exc()
             return {"success": False, "error": str(e)}
 
 # Global instance

@@ -71,19 +71,24 @@ def render_pdf(rfq: dict, no: int) -> bytes:
                     self.entry_list.append((text, self.page))
                 elif style == 'Heading2':
                     self.entry_list.append(("   " + text, self.page))
-                elif style == 'Heading3':
-                    self.entry_list.append(("      " + text, self.page))
+                # Heading3 is excluded from TOC to maintain professional brevity
 
     def create_toc_table(entries):
         if not entries:
             return Paragraph("No sections found.", styles["Body"])
             
-        # Header for TOC Table
         data = [["Section", "Page"]]
-        for text, page in entries:
-            data.append([text, str(page)])
+        # Custom styles for TOC to ensure proper wrapping and alignment
+        toc_style = ParagraphStyle(name="TOCEntry", fontSize=10, leading=14, fontName="Helvetica")
+        toc_style_bold = ParagraphStyle(name="TOCEntryBold", fontSize=11, leading=15, fontName="Helvetica-Bold")
         
-        t = Table(data, colWidths=[4.2*inch, 0.8*inch])
+        for text, page in entries:
+            # Main sections are bold, sub-sections (with leading spaces) are normal
+            s = toc_style_bold if not text.startswith(" ") else toc_style
+            data.append([Paragraph(text.strip(), s), Paragraph(str(page), toc_style)])
+        
+        # Increase width of section column and ensure it wraps
+        t = Table(data, colWidths=[5.2*inch, 0.7*inch])
         t.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), HexColor("#006680")), 
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
@@ -93,7 +98,7 @@ def render_pdf(rfq: dict, no: int) -> bytes:
             ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
             ('TOPPADDING', (0, 0), (-1, -1), 8),
             ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'), # Align to top so wrapped text stays with number
         ]))
         return t
 
@@ -232,11 +237,17 @@ def render_pdf(rfq: dict, no: int) -> bytes:
             # Match "1. Title" or "1.1 Title" or "Section 1: Title"
             is_header_like = re.match(r"^(\d+\.|\d+\.\d+|Section\s+\d+:)", clean_line, re.IGNORECASE)
             
-            if is_header_like and len(clean_line) < 100:
-                is_sub = "." in clean_line.split(" ")[0] if clean_line else False
-                style = styles["Heading2"] if is_sub else styles["Heading1"]
-                story.append(Paragraph(clean_line, style))
-                continue
+            # Headers are usually concise. If a line exceeds 60 chars or contains colons
+            # (like "1. Item: Description"), it's likely a requirement item, not a header.
+            if is_header_like and len(clean_line) < 60:
+                # If it has a colon, ensure it's a "Section N:" style, otherwise it's body
+                if ":" in clean_line and not clean_line.lower().startswith("section"):
+                    pass # Treat as body
+                else:
+                    is_sub = "." in clean_line.split(" ")[0] if clean_line else False
+                    style = styles["Heading2"] if is_sub else styles["Heading1"]
+                    story.append(Paragraph(clean_line, style))
+                    continue
 
             # --- Standard Markdown Header Fallback ---
             if line.startswith('### '):

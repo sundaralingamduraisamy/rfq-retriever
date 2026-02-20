@@ -34,10 +34,10 @@ def get_model():
         _active_model = _active_model.float() # Force float32 for CPU compatibility
         _active_processor = AutoProcessor.from_pretrained(settings.IMAGE_MODEL_NAME, trust_remote_code=True, token=settings.HUGGINGFACE_TOKEN)
         _model_type = "jina"
-        print(f"✅ {settings.IMAGE_MODEL_NAME} loaded successfully.")
         return _active_model, _active_processor, _model_type
     except Exception as e:
-        print(f"⚠️ JinaCLIP load failed: {e}. Falling back to standard CLIP...")
+        # print(f"⚠️ JinaCLIP load failed: {e}. Falling back to standard CLIP...")
+        pass
 
     # Attempt 2: Standard CLIP (More likely to be cached or smaller)
     try:
@@ -47,25 +47,34 @@ def get_model():
         _active_model = CLIPModel.from_pretrained(settings.IMAGE_MODEL_FALLBACK, use_safetensors=True)
         _active_processor = CLIPProcessor.from_pretrained(settings.IMAGE_MODEL_FALLBACK)
         _model_type = "clip"
-        print(f"✅ Fallback {settings.IMAGE_MODEL_FALLBACK} loaded successfully.")
+        # print(f"✅ Fallback {settings.IMAGE_MODEL_FALLBACK} loaded successfully.")
         return _active_model, _active_processor, _model_type
     except Exception as e:
-        print(f"❌ All CLIP models failed to load: {e}")
+        # print(f"❌ All CLIP models failed to load: {e}")
         raise RuntimeError(f"No image classification model available. Error: {e}")
 
 class ImageProcessor:
     def __init__(self):
         # Slightly more descriptive labels for better CLIP matching
         self.target_labels = [
-            "a technical diagram of a car part", 
-            "an automobile engine", 
-            "a vehicle component", 
-            "a car brake system", 
-            "an automotive assembly",
-            "a car interior",
-            "a vehicle chassis"
+            "a technical diagram of a vehicle component", 
+            "an engineering schematic of a car part",
+            "a detailed mechanical drawing of a vehicle assembly",
+            "a technical illustration of automotive hardware",
+            "an engineering blueprint for carriage parts"
         ]
-        self.negative_labels = ["a person", "a landscape", "nature", "food", "text only", "a building", "an animal", "furniture"]
+        self.negative_labels = [
+            "a company logo or brand emblem",
+            "a generic decorative icon",
+            "a document page with only text",
+            "a signature or official stamp",
+            "a person's face", 
+            "a landscape or nature scene", 
+            "food and drinks", 
+            "a building or architectural structure",
+            "furniture and home decor",
+            "a colorful infographic with text"
+        ]
 
     def is_automobile_related(self, pil_image: Image.Image) -> tuple[bool, str, float]:
         """Verify if image is car-related using available model"""
@@ -78,7 +87,7 @@ class ImageProcessor:
                 outputs = model(**inputs)
             logits_per_image = outputs.logits_per_image
         except Exception as e:
-            print(f"   ❌ JinaCLIP Inference Error: {e}")
+            # print(f"   ❌ JinaCLIP Inference Error: {e}")
             return False, "Error", 0.0
         probs = logits_per_image.softmax(dim=1)
         
@@ -172,7 +181,8 @@ class ImageProcessor:
                 
                 results.append(res)
             except Exception as e:
-                print(f"⚠️ Error processing image: {e}")
+                # print(f"⚠️ Error processing image: {e}")
+                pass
         
         return results
 

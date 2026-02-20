@@ -235,6 +235,11 @@ class ChatAgent:
             # --- IMAGE DEDUPLICATION & HALLUCINATION GUARD ---
             # Extract valid image IDs from the context to verify the agent isn't inventing them
             valid_ids = [str(d.get("image_id")) for d in context_docs if d.get("image_id")]
+            
+            # ALSO: Include any images ALREADY in the current draft (so we don't delete them)
+            existing_images = re.findall(r"\[\[IMAGE_ID:([^\]]+)\]\]", self.current_draft_context or "")
+            valid_ids = list(set(valid_ids + existing_images))
+            
             seen_in_draft = set()
 
             def image_guard_callback(match):
@@ -264,7 +269,7 @@ class ChatAgent:
                 "analysis": analysis
             }
             
-            return f"TECHNICAL UPDATE SUCCESSFUL: Applied instructions: {instructions}. Impact analysis is ready for review.", []
+            return f"TECHNICAL UPDATE SUCCESSFUL: Draft updated. The system has automatically generated a separate Impact Analysis for the user. Proceed to confirm the update with the user in a short sentence, but DO NOT repeat the impact analysis details.", []
 
         except Exception as e:
             traceback.print_exc()
@@ -286,7 +291,10 @@ class ChatAgent:
             r"(\w+)\s+query=[\"'](.*?)[\"']",                      # name query="..."
             r"(\w+)\s+instructions=[\"'](.*?)[\"']",               # name instructions="..."
             r"(\w+)\s+insstructions=[\"'](.*?)[\"']",              # name insstructions="..." (typo fix)
-            r"(\w+)\s+filename=[\"'](.*?)[\"']"                    # name filename="..."
+            r"(\w+)\s+filename=[\"'](.*?)[\"']",                   # name filename="..."
+            r"\[TOOL\s+(\w+)\]\s*(\{.*?\})",                       # [TOOL name] {...}
+            r"Action:\s*(\w+)\s*\nAction Input:\s*(\{.*?\})",      # ReAct style
+            r"\"name\":\s*\"(\w+)\".*?\"args\":\s*(\{.*?\})"        # Lazy JSON fragment
         ]
         
         for pattern in patterns:
@@ -308,9 +316,10 @@ class ChatAgent:
                     arg_matches = re.findall(r"(\w+)=[\"'](.*?)[\"']", raw_args)
                     if arg_matches:
                         args = {k: v for k, v in arg_matches}
-                        # Map typo
-                        if "insstructions" in args:
-                            args["instructions"] = args.pop("insstructions")
+                        # Map typos/singulars to "instructions"
+                        for key in ["insstructions", "insturctions", "instruction"]:
+                            if key in args:
+                                args["instructions"] = args.pop(key)
                     elif len(raw_args.strip()) > 0 and len(arg_matches) == 0:
                         # Single positional-ish arg
                         if name == "search_documents" or name == "search_images":
@@ -448,8 +457,11 @@ class ChatAgent:
    
         context_messages.append(SystemMessage(content=base_prompt))
         
-        # Add history
-        for m in messages[:-1]:
+        # Add history (TRIMMED: Keep last 20 messages to ensure deep context while staying within safety limits)
+        # 10 rounds of conversation (10 User + 10 AI)
+        history_window = messages[-20:-1] if len(messages) > 20 else messages[:-1]
+        
+        for m in history_window:
             role = m.get("role")
             content = m.get("content") or ""
             if role == "user":
@@ -480,8 +492,6 @@ class ChatAgent:
 
                 # Handle Tool Calls
                 if tool_calls:
-                    # print(f"🛠️ Tool Call Detected (Iter {iteration}): {tool_calls}")
-                    
                     # Ensure tool_calls is on the message for history
                     response.tool_calls = tool_calls
                     context_messages.append(response)
@@ -548,8 +558,7 @@ class ChatAgent:
                 response_text = re.sub(r"\[\[IMAGE_ID:([^\]]+)\]\]", final_scrub_cb, response_text)
                 # ---------------------------
 
-                # print(f"✅ Final Response. Found docs: {len(found_documents)}")
-                return response_text, found_documents, self.pending_update
+                # No tool call -> Final Response
                 
             except Exception as e:
                 err_str = str(e)

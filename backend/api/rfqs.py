@@ -48,15 +48,12 @@ def update_rfq_status(rfq_id: int, data: UpdateStatusModel):
 @router.post("/rfqs/save")
 def save_rfq(data: SaveRFQModel):
     """Save or Update RFQ in DB"""
-    print(f"📥 Received save request: id={data.id}, title={data.title}")
     if not db:
-        print("❌ Database connection failed during save")
         raise HTTPException(500, "Database connection failed")
 
     try:
         if data.id:
             # Update existing
-            print(f"📝 Updating existing RFQ {data.id}")
             rows_affected = db.execute_update(
                 """
                 UPDATE generated_rfqs 
@@ -67,14 +64,11 @@ def save_rfq(data: SaveRFQModel):
             )
             
             if rows_affected > 0:
-                print(f"✅ RFQ {data.id} updated successfully")
                 return {"status": "updated", "id": data.id, "title": data.title}
             else:
-                print(f"⚠️ RFQ ID {data.id} not found in DB. Falling back to INSERT.")
-                # Fall through to insert new if update failed because ID doesn't exist
+                pass # Fall through to insert new if update failed because ID doesn't exist
         
         # Insert new
-        print(f"🆕 Creating new RFQ: {data.title}")
         row = db.execute_insert_returning(
             """
             INSERT INTO generated_rfqs (filename, content, status) 
@@ -84,10 +78,8 @@ def save_rfq(data: SaveRFQModel):
             (data.title, data.content, data.status)
         )
         if not row:
-            print("❌ Failed to insert RFQ into database")
             raise HTTPException(500, "Failed to insert RFQ")
         rfq_id = row[0]
-        print(f"✅ New RFQ created with ID: {rfq_id}")
         
         # --- AUTO-INDEXING FOR RETRIEVAL ---
         # Make this RFQ valid for search immediately
@@ -95,18 +87,16 @@ def save_rfq(data: SaveRFQModel):
             from core.ingestion import indexer
             # Create a virtual filename for the index
             virtual_filename = f"Generated_RFQ_{rfq_id}_{data.title}.md"
-            print(f"🔍 Auto-indexing generated RFQ as: {virtual_filename}")
             
             # Index content (as bytes for consistency)
             indexer.index_document(virtual_filename, data.content.encode('utf-8'), category="Generated RFQ")
         except Exception as idx_err:
-            print(f"⚠️ Warning: Failed to auto-index RFQ: {idx_err}")
+            pass
         # -----------------------------------
 
         return {"status": "created", "id": rfq_id, "title": data.title}
 
     except Exception as e:
-        print(f"❌ Save error: {e}")
         raise HTTPException(500, f"Save failed: {str(e)}")
 
 
@@ -155,8 +145,6 @@ def delete_rfq_db(rfq_id: int):
     """Delete RFQ from DB and its corresponding index in the document library"""
     if not db:
         raise HTTPException(500, "Database connection failed")
-        
-    print(f"🗑️ Deleting RFQ ID {rfq_id}...")
 
     try:
         # --- SYNC: Find and delete the indexed document version too ---
@@ -167,19 +155,16 @@ def delete_rfq_db(rfq_id: int):
         )
         if doc_match:
             doc_id, doc_name = doc_match
-            print(f"   🔄 Syncing: Purging indexed document '{doc_name}' (ID: {doc_id})...")
             db.execute_update("DELETE FROM documents WHERE id = %s", (doc_id,))
         # ---------------------------------------------------------------
 
         # Delete the main RFQ record
         success = db.execute_update("DELETE FROM generated_rfqs WHERE id = %s", (rfq_id,))
         if success:
-            print(f"✅ RFQ {rfq_id} deleted successfully.")
             return {"status": "deleted", "id": rfq_id}
         else:
             raise HTTPException(404, "RFQ not found")
     except Exception as e:
-        print(f"❌ Error during RFQ deletion (ID: {rfq_id}): {e}")
         raise HTTPException(500, f"Deletion failed: {str(e)}")
 
 @router.get("/rfqs/{rfq_id}/pdf")
